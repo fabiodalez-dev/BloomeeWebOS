@@ -1,4 +1,4 @@
-> **Fork per LG webOS:** il porting installabile per LG è in [webos/](webos/README.md). Include un timer persistente per ascoltare musica a schermo spento; la stessa impostazione è disponibile nella versione Android TV, con oscuramento compatibile con le API Android. Il codice e le funzioni Android originali sono conservati.
+> **Fork per LG webOS:** il porting installabile per LG è in [webos/](webos/README.md), con YouTube Music (home, ricerca, artisti, album, playlist e libreria dell'account) e Jellyfin. Include un timer persistente per ascoltare musica a schermo spento; la stessa impostazione è disponibile nella versione Android TV, con oscuramento compatibile con le API Android. Il codice e le funzioni Android originali sono conservati.
 
 # 📺 Bloomee TV
 

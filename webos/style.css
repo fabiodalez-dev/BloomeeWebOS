@@ -498,3 +498,358 @@ nav svg {
 #time {
   font-size: 20px;
 }
+nav button {
+  padding: 13px 18px;
+  margin-bottom: 4px;
+}
+.brand {
+  padding-bottom: 26px;
+}
+#connection span {
+  display: block;
+}
+.yt-section {
+  margin: 0 0 34px;
+}
+.yt-section h3,
+.search-block h3 {
+  font-size: 30px;
+  margin: 0 0 18px;
+}
+.section-title {
+  display: inline-block;
+  background: transparent;
+  font-size: 30px;
+  font-weight: 700;
+  padding: 8px 14px;
+  margin: 0 0 10px -14px;
+}
+.shelf {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 10px 10px 14px;
+  margin: 0 -10px;
+  scroll-padding: 10px;
+}
+.shelf::-webkit-scrollbar {
+  display: none;
+}
+.shelf > button {
+  flex: 0 0 236px;
+  width: 236px;
+  margin-right: 26px;
+}
+.yt-card {
+  position: relative;
+}
+.yt-card.circle img {
+  border-radius: 50%;
+}
+.yt-card .badge {
+  position: absolute;
+  top: 182px;
+  left: 14px;
+  width: 42px;
+  height: 42px;
+  line-height: 42px;
+  border-radius: 50%;
+  text-align: center;
+  font-style: normal;
+  font-size: 18px;
+  background: rgba(20, 17, 22, .78);
+  color: var(--ink);
+}
+.yt-list .track:nth-child(even) {
+  background: #201a22;
+}
+.tabs {
+  flex-wrap: wrap;
+}
+.tabs button,
+.explore button {
+  margin-bottom: 14px;
+}
+.explore {
+  margin-top: 10px;
+}
+.artist-head {
+  display: flex;
+  align-items: flex-start;
+  margin: 0 0 36px;
+}
+.artist-head img {
+  width: 300px;
+  height: 300px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 50%;
+  background: #302733;
+  margin-right: 52px;
+}
+.artist-about {
+  flex: 1;
+  min-width: 0;
+}
+.artist-about .facts {
+  color: var(--accent);
+  font-size: 24px;
+  margin: 8px 0 14px;
+}
+.artist-about .bio {
+  color: var(--muted);
+  font-size: 23px;
+  line-height: 1.5;
+  max-height: 5.9em;
+  overflow: hidden;
+  margin: 0 0 24px;
+}
+.search-block {
+  margin: 0 0 40px;
+}
+.source-title {
+  font-size: 18px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 22px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 24px;
+}
+/* Testata della Home: l'elemento con il focus (TvHomeScreen._HeroHeader). */
+header .titles {
+  min-width: 0;
+  flex: 1;
+}
+header h1 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#hero-art {
+  width: 104px;
+  height: 104px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-right: 28px;
+  flex-shrink: 0;
+  display: none;
+}
+#hero-sub {
+  display: none;
+  margin: 8px 0 0;
+  font-size: 22px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+main.hero #hero-art:not([hidden]) {
+  display: block;
+}
+main.hero #hero-sub {
+  display: block;
+}
+main.hero h1 {
+  font-size: 40px;
+}
+#refresh {
+  flex-shrink: 0;
+}
+.row-head {
+  display: flex;
+  align-items: baseline;
+}
+.row-head h3 {
+  margin-right: 18px;
+}
+.row-sub {
+  color: var(--muted);
+  font-size: 20px;
+  margin-left: 6px;
+}
+.home-tools,
+.home-hint {
+  margin-bottom: 26px;
+}
+.setting-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 900px;
+  flex-shrink: 0;
+}
+.setting-buttons button {
+  margin: 6px 0 6px 14px;
+  min-height: 70px;
+}
+.page-title {
+  font-size: 30px;
+  margin: 30px 0 16px;
+}
+.favorite-group {
+  border: 1px solid #46364a;
+  border-radius: 14px;
+  padding: 6px 20px 14px;
+  margin: 0 0 26px;
+}
+.favorite-group .actions {
+  margin: 16px 0 4px;
+}
+.chips {
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.chips button {
+  margin-bottom: 12px;
+}
+.filters-panel[hidden] {
+  display: none;
+}
+.filters-panel {
+  background: #211a25;
+  border-radius: 14px;
+  padding: 18px 18px 8px;
+  margin: 0 0 18px;
+}
+.search-error {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 22px;
+  margin: 0 0 12px;
+}
+.search-error span {
+  flex: 1;
+  margin-right: 20px;
+}
+.search-results h3 {
+  font-size: 30px;
+  margin: 18px 0 14px;
+}
+.track-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-gap: 0 18px;
+  padding-bottom: 20px;
+}
+.track-grid .track:nth-child(even) {
+  background: transparent;
+}
+.track-grid .track {
+  background: #201a22;
+}
+.artist-banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 420px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+.artist-banner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  opacity: .45;
+}
+.artist-banner::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  background: linear-gradient(rgba(20, 17, 22, 0), var(--bg));
+}
+#content {
+  position: relative;
+}
+.artist-head {
+  position: relative;
+}
+.artist-about .bio {
+  max-height: 3em;
+}
+.bio-full {
+  font-size: 24px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-line;
+}
+.dialog-backdrop {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 8, 12, .78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.dialog {
+  background: var(--surface);
+  border: 1px solid #57445d;
+  border-radius: 20px;
+  width: 980px;
+  max-height: 900px;
+  padding: 36px 42px 30px;
+  display: flex;
+  flex-direction: column;
+}
+.dialog h2 {
+  font-size: 34px;
+  margin: 0 0 20px;
+}
+.dialog-body {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.dialog-body p {
+  font-size: 24px;
+  line-height: 1.5;
+}
+.dialog-body input {
+  width: 100%;
+  background: #302733;
+  border: 1px solid #57445d;
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 20px;
+  margin: 0 0 10px;
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 22px;
+}
+.dialog-actions button {
+  margin: 0 16px 12px 0;
+}
+.dialog.menu .dialog-actions {
+  flex-direction: column;
+}
+.dialog.menu .dialog-actions button {
+  text-align: left;
+  margin: 0 0 12px;
+}
+.pair-url {
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 6px 0 18px;
+}
+.pair-code {
+  font-size: 64px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  margin: 0 0 12px;
+}

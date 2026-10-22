@@ -1,0 +1,58 @@
+name: "webOS release"
+
+# Avvio manuale: rifà i test, crea l'IPK e pubblica la release "webos-v<versione>"
+# con le note di webos/docs/RELEASE_<versione>.md.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione, uguale a webos/appinfo.json (es. 0.3.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish IPK
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check version
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Versione non valida"; exit 1; }
+          test "$(node -p "require('./webos/appinfo.json').version")" = "$VERSION"
+          test -f "webos/docs/RELEASE_$VERSION.md"
+
+      - name: Install
+        working-directory: webos
+        run: npm ci
+
+      - name: Tests
+        working-directory: webos
+        run: npm test
+
+      - name: Package
+        working-directory: webos
+        run: |
+          npm run build
+          node package.mjs ../release-webos "$PWD/node_modules/.bin/ares-package"
+          cd ../release-webos && sha256sum *.ipk > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "webos-v$VERSION" release-webos/*.ipk release-webos/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "Bloomee per LG webOS $VERSION" \
+            --notes-file "webos/docs/RELEASE_$VERSION.md"

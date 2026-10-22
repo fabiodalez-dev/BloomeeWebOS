@@ -14,4 +14,90 @@ class Routes(unittest.TestCase):
  def test_media_urls_never_contain_the_server_credential(self):
   path,args=bridge.route('/audio/'+'b'*32,{},'a'*32)
   self.assertNotIn('api_key',args);self.assertNotIn('token',args);self.assertEqual(path,'/Audio/'+'b'*32+'/universal')
+class YouTube(unittest.TestCase):
+ def test_only_fixed_endpoints_and_fields_reach_youtube(self):
+  body,query=bridge.yt_body('search',{'query':'pausini','context':{'client':{'clientName':'X'}},'evil':'1'},None)
+  self.assertEqual(body['query'],'pausini');self.assertNotIn('evil',body);self.assertEqual(body['context']['client']['clientName'],'WEB_REMIX')
+  for endpoint in ['player','../browse','browse/../../x','https://example.com']:
+   with self.assertRaises(ValueError):bridge.yt_body(endpoint,{},None)
+  for bad in [{'query':5},{'query':'x'*9000},[]]:
+   with self.assertRaises(ValueError):bridge.yt_body('search',bad,None)
+ def test_legacy_continuations_travel_in_the_query(self):
+  body,query=bridge.yt_body('browse',{'continuation':'tok','legacy':True},None)
+  self.assertNotIn('continuation',body);self.assertEqual((query['ctoken'],query['continuation'],query['type']),('tok','tok','next'))
+  body,query=bridge.yt_body('browse',{'continuation':'tok'},None);self.assertEqual(body['continuation'],'tok');self.assertNotIn('ctoken',query)
+ def test_account_requests_are_signed_and_delegated(self):
+  account={'cookie':'A=1; SAPISID=secret; B=2','visitorData':'v','dataSyncId':'brand||user'}
+  h=bridge.yt_headers(account,now=1700000000)
+  self.assertEqual(h['Authorization'],'SAPISIDHASH 1700000000_'+bridge.hashlib.sha1(b'1700000000 secret https://music.youtube.com').hexdigest())
+  self.assertEqual(h['Cookie'],account['cookie']);self.assertEqual(h['X-Goog-Visitor-Id'],'v')
+  body,_=bridge.yt_body('browse',{'browseId':'FEmusic_home'},account);self.assertEqual(body['context']['user'],{'onBehalfOfUser':'brand'})
+  self.assertNotIn('Cookie',bridge.yt_headers(None));self.assertNotIn('Authorization',bridge.yt_headers({'cookie':'NID=1'}))
+ def test_audio_prefers_aac_and_skips_signed_formats(self):
+  player={'streamingData':{'adaptiveFormats':[{'itag':251,'mimeType':'audio/webm','url':'o'},{'itag':140,'mimeType':'audio/mp4','signatureCipher':'s'},{'itag':139,'mimeType':'audio/mp4','url':'low'},{'itag':137,'mimeType':'video/mp4','url':'v'}]}}
+  self.assertEqual(bridge.pick_audio(player)['url'],'o')
+  player['streamingData']['adaptiveFormats'][1]['url']='aac'
+  self.assertEqual(bridge.pick_audio(player)['url'],'aac');self.assertEqual(bridge.pick_audio(player,alt=True)['url'],'o')
+  self.assertIsNone(bridge.pick_audio({'streamingData':{'adaptiveFormats':[{'itag':137,'mimeType':'video/mp4','url':'v'}]}}))
+ def test_cached_streams_are_reused_until_they_expire(self):
+  bridge.streams.clear();bridge.streams[('abcdefghijk',False)]={'url':'u','ua':'x','client':'IOS','expire':bridge.time.time()+60}
+  self.assertEqual(bridge.resolve('abcdefghijk')['url'],'u')
+  bridge.forget('abcdefghijk');self.assertNotIn(('abcdefghijk',False),bridge.streams)
+class HomeAndPairing(unittest.TestCase):
+ def test_home_rows_use_fixed_sort_orders(self):
+  _,args=bridge.route('/api/library',{'kind':['MusicAlbum'],'sort':['recent']},'a'*32);self.assertEqual((args['SortBy'],args['SortOrder']),('DateCreated','Descending'))
+  _,args=bridge.route('/api/library',{'kind':['MusicAlbum'],'sort':['random']},'a'*32);self.assertEqual(args['SortBy'],'Random')
+  with self.assertRaises(ValueError):bridge.route('/api/library',{'kind':['MusicAlbum'],'sort':['Name,Path']},'a'*32)
+ def test_account_name_is_read_from_the_account_menu(self):
+  self.assertEqual(bridge.account_name({'actions':[{'x':{'activeAccountHeaderRenderer':{'accountName':{'runs':[{'text':'Fabio'}]}}}}]}),'Fabio')
+  self.assertIsNone(bridge.account_name({'actions':[]}))
+ def test_pairing_needs_the_code_and_closes_after_five_wrong_codes(self):
+  p=bridge.Pairing();p.server=object();p.code='123456';p.expires=bridge.time.time()+60
+  p.close_locked=lambda:None
+  for _ in range(4):self.assertFalse(p.submit('000000','SAPISID=x','')[0]);self.assertTrue(p.active())
+  self.assertFalse(p.submit('000000','SAPISID=x','')[0]);self.assertFalse(p.active())
+  self.assertIn('Troppi',p.status()['error'])
+  self.assertFalse(p.submit('123456','SAPISID=x','')[0])
+ def test_pairing_rejects_cookies_without_sapisid_and_saves_only_verified_ones(self):
+  import tempfile,os,json
+  d=tempfile.mkdtemp();old=bridge.YOUTUBE;bridge.YOUTUBE=os.path.join(d,'youtube.json');real=bridge.check_account
+  try:
+   p=bridge.Pairing();p.server=object();p.code='123456';p.expires=bridge.time.time()+60;p.close_locked=lambda:None
+   self.assertFalse(p.submit('123456','NID=1','')[0]);self.assertFalse(os.path.exists(bridge.YOUTUBE))
+   bridge.check_account=lambda account:None
+   self.assertFalse(p.submit('123456','SAPISID=x','')[0]);self.assertFalse(os.path.exists(bridge.YOUTUBE))
+   bridge.check_account=lambda account:'Fabio'
+   ok,note=p.submit('123456','SAPISID=x; A=1','brand||u');self.assertTrue(ok)
+   saved=json.load(open(bridge.YOUTUBE));self.assertEqual((saved['cookie'],saved['dataSyncId'],saved['name']),('SAPISID=x; A=1','brand||u','Fabio'))
+   self.assertEqual(oct(os.stat(bridge.YOUTUBE).st_mode&0o777),oct(0o600));self.assertEqual(p.status()['name'],'Fabio');self.assertFalse(p.active())
+  finally:bridge.YOUTUBE=old;bridge.check_account=real
+class ReviewFixes(unittest.TestCase):
+ def setUp(self):
+  import tempfile,os
+  self.d=tempfile.mkdtemp();self.old=bridge.YOUTUBE;bridge.YOUTUBE=os.path.join(self.d,'youtube.json');self.real=bridge.check_account
+ def tearDown(self):bridge.YOUTUBE=self.old;bridge.check_account=self.real
+ def pairing(self):
+  p=bridge.Pairing();p.server=object();p.code='123456';p.expires=bridge.time.time()+60;p.close_locked=lambda:None;return p
+ def test_the_code_can_be_typed_as_shown_on_the_tv(self):
+  bridge.check_account=lambda account:'Fabio'
+  p=self.pairing();self.assertTrue(p.submit('123 456','SAPISID=x','')[0]);self.assertEqual(p.attempts,0)
+ def test_closing_on_the_tv_during_the_google_check_discards_the_cookie(self):
+  import os
+  p=self.pairing()
+  def slow(account):p.close();return 'Fabio'
+  bridge.check_account=slow
+  ok,note=p.submit('123456','SAPISID=x','');self.assertFalse(ok);self.assertIn('chiuso',note);self.assertFalse(os.path.exists(bridge.YOUTUBE))
+ def test_refused_videos_are_not_asked_again_for_ten_minutes(self):
+  calls=[];real=bridge.urlopen
+  class R(object):
+   def read(self):return b'{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Conferma di non essere un bot"}}'
+   def close(self):pass
+  def fake(req,timeout=0):calls.append(1);return R()
+  bridge.urlopen=fake;bridge.refused.clear();bridge.streams.clear()
+  try:
+   for alt in (False,True,False):
+    with self.assertRaises(LookupError) as e:bridge.resolve('zzzzzzzzzzz',(),alt)
+    self.assertIn('bot',e.exception.args[0])
+   self.assertEqual(len(calls),len(bridge.YT_PLAYERS))
+  finally:bridge.urlopen=real;bridge.refused.clear()
 if __name__=='__main__':unittest.main()
