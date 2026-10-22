@@ -1,3 +1,5 @@
+> **Fork per LG webOS:** il porting installabile per LG è in [webos/](webos/README.md). Include un timer persistente per ascoltare musica a schermo spento; la stessa impostazione è disponibile nella versione Android TV, con oscuramento compatibile con le API Android. Il codice e le funzioni Android originali sono conservati.
+
 # 📺 Bloomee TV
 
 A music player for Android TV and Google TV, designed for listening from the sofa with a remote. It combines YouTube Music discovery, your Jellyfin music library and album requests to a Lidarr server. The TV interface is primarily in Italian; some inherited screens and error messages use the selected app language or English.

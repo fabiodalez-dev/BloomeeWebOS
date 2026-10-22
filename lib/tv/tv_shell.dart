@@ -1,3 +1,4 @@
+import 'package:Bloomee/tv/ui/tv_screen_off_guard.dart';
 import 'dart:async';
 
 import 'package:Bloomee/blocs/media_player/bloomee_player_cubit.dart';
@@ -386,7 +387,7 @@ class _TvShellState extends State<TvShell> {
     final page = _page;
     final stackIndex = page == null ? 0 : _TvPage.values.indexOf(page) + 1;
 
-    return PlayerOverlayWrapper(
+    return TvScreenOffGuard(child: PlayerOverlayWrapper(
       child: BlocListener<PlayerOverlayCubit, bool>(
         listener: (_, visible) {
           if (visible) {
@@ -491,7 +492,7 @@ class _TvShellState extends State<TvShell> {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 

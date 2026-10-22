@@ -142,3 +142,10 @@ app.*.symbols
 
 
 /assets/*.env
+# Local Kotlin compiler caches
+android/.kotlin/
+# Generated webOS bundle and Python bytecode
+webos/app.js
+webos/__pycache__/
+webos/*.pyc
+/release-webos/

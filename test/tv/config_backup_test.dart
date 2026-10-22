@@ -57,6 +57,16 @@ void main() {
     if (db.isOpen) await db.close();
     await root.delete(recursive: true);
   });
+  test('screen idle preference survives a configuration reload and accepts Mai', () async {
+    await TvConfig.saveScreenOffSeconds(60);
+    expect(await dao.getSettingStr('tv.screenOffSeconds'), '60');
+    TvConfig.screenOffSeconds = 0;
+    await TvConfig.load();
+    expect(TvConfig.screenOffSeconds, 60);
+    await TvConfig.saveScreenOffSeconds(0);
+    await TvConfig.load();
+    expect(TvConfig.screenOffSeconds, 0);
+  });
   test('legacy plaintext is erased only after a successful encrypted write',
       () async {
     await dao.putSettingStr('tv.yt.cookie', 'SAPISID=PRIVATE');

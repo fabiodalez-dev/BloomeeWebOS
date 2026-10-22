@@ -1,0 +1,3 @@
+# Bloomee LG visual system
+
+A person listens from a sofa in a dim living room, reading album covers and large track names on a 43 inch TV. Dark plum surfaces preserve the existing Bloomee identity and limit glare. Use restrained pink for selection and principal actions, warm near-white text, neutral filled controls, a left navigation column, square album covers and a persistent now-playing bar. Use fixed 1920×1080 composition scaled to fit. Chrome 68 requires sRGB fallbacks instead of unsupported OKLCH. Avoid layout animation and filters. Native focus outline with a small transform communicates remote selection. Settings rows are at least 84px high, with descriptive text explaining that audio continues when only the panel is off.

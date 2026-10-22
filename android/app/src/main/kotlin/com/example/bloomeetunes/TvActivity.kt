@@ -21,9 +21,18 @@ class TvActivity : AudioServiceActivity() {
     private var pending: MethodChannel.Result? = null
     private var recognizer: SpeechRecognizer? = null
     private var lang = "it-IT"
+    private var screenBlank: TvScreenBlank? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val screenChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "bloomee_tv/screen")
+        screenBlank = TvScreenBlank(this, screenChannel)
+        screenChannel.setMethodCallHandler { call, result ->
+            if (call.method == "black") {
+                screenBlank?.setBlack(call.arguments == true)
+                result.success(null)
+            } else result.notImplemented()
+        }
         TvCastBridge.attach(MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "bloomee_tv/cast"))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "bloomee_tv/storage").setMethodCallHandler { call, result ->
             try {
@@ -125,6 +134,7 @@ class TvActivity : AudioServiceActivity() {
     }
 
     private fun finish(text: String?) {
+        screenBlank?.wake(false)
         recognizer?.destroy()
         recognizer = null
         pending?.success(text)
@@ -137,6 +147,7 @@ class TvActivity : AudioServiceActivity() {
             pending = null
             return
         }
+        screenBlank?.wake(false)
         recognizer?.destroy()
         val r = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = r
@@ -154,7 +165,8 @@ class TvActivity : AudioServiceActivity() {
                     else -> "Errore riconoscimento ($error)"
                 }
                 if (msg == null) finish(null) else {
-                    recognizer?.destroy(); recognizer = null
+                    screenBlank?.wake(false)
+        recognizer?.destroy(); recognizer = null
                     pending?.error("error", msg, null); pending = null
                 }
             }
@@ -177,10 +189,17 @@ class TvActivity : AudioServiceActivity() {
     }
 
     override fun onStart() { super.onStart(); TvCastBridge.start(intent) }
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (screenBlank?.key(event) == true) return true
+        return super.dispatchKeyEvent(event)
+    }
+    override fun onPause() { screenBlank?.wake(true); super.onPause() }
+
     override fun onStop() { TvCastBridge.background(); super.onStop() }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); TvCastBridge.handleIntent(intent) }
 
     override fun onDestroy() {
+        screenBlank?.wake(false)
         recognizer?.destroy()
         super.onDestroy()
     }

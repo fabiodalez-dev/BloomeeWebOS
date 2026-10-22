@@ -1,0 +1,17 @@
+{
+  "id": "org.bloomee.webos",
+  "version": "0.1.1",
+  "vendor": "Bloomee contributors",
+  "type": "web",
+  "main": "index.html",
+  "title": "Bloomee",
+  "icon": "icon.png",
+  "largeIcon": "icon.png",
+  "resolution": "1920x1080",
+  "bgColor": "#141116",
+  "disableBackHistoryAPI": true,
+  "requiredPermissions": [
+    "all"
+  ],
+  "handlesRelaunch": true
+}

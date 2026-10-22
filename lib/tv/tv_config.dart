@@ -24,6 +24,13 @@ class TvConfig {
   static TvSecretStore secretStore = AndroidTvSecretStore();
   static http.Client httpClient = tvHttpClient;
   static String profileId = 'default';
+  static int screenOffSeconds = 0;
+  static Future<void> saveScreenOffSeconds(int value) async {
+    final bounded = value.clamp(0, 3600);
+    await _dao.putSettings({'tv.screenOffSeconds': bounded.toString()});
+    screenOffSeconds = bounded;
+    changes.value++;
+  }
   static String ytCookie = '', ytVisitor = '', ytDataSync = '', ytName = '';
   static String jellyfinUrl = '',
       jellyfinUser = '',
@@ -112,6 +119,9 @@ class TvConfig {
   static Future<void> load() async {
     await _writes;
     final d = _dao;
+    screenOffSeconds =
+        (int.tryParse(await d.getSettingStr('tv.screenOffSeconds') ?? '') ?? 0)
+            .clamp(0, 3600);
     final secure = await secretStore.read(profileId);
     var migrated = false;
     for (final key in [

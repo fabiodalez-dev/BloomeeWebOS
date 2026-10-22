@@ -589,6 +589,44 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
         children: [
           const Text('Impostazioni', style: TvText.hero),
           const SizedBox(height: 24),
+          const Text('Schermo durante l’ascolto', style: TvText.card),
+          const SizedBox(height: 12),
+          const Text(
+            'Oscura dopo un periodo senza interazioni, solo mentre ascolti musica. '
+            'La scelta viene salvata. Su Android mostra nero e riduce la luminosità: '
+            'lo spegnimento fisico del pannello dipende dal televisore. '
+            'Premi OK o una freccia per tornare all’app.',
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<int>(
+            value: TvConfig.screenOffSeconds,
+            decoration: const InputDecoration(
+              labelText: 'Spegni / oscura schermo dopo',
+            ),
+            items: const [
+              DropdownMenuItem(value: 0, child: Text('Mai')),
+              DropdownMenuItem(value: 15, child: Text('15 secondi')),
+              DropdownMenuItem(value: 30, child: Text('30 secondi')),
+              DropdownMenuItem(value: 60, child: Text('1 minuto')),
+              DropdownMenuItem(value: 120, child: Text('2 minuti')),
+              DropdownMenuItem(value: 300, child: Text('5 minuti')),
+            ],
+            onChanged: (value) async {
+              if (value == null) return;
+              try {
+                await TvConfig.saveScreenOffSeconds(value);
+                if (mounted) setState(() {});
+              } catch (_) {
+                if (mounted)
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Impossibile salvare la preferenza'),
+                    ),
+                  );
+              }
+            },
+          ),
+          const SizedBox(height: 32),
           TvPillButton(
               icon: Icons.dashboard_customize,
               label: 'Centro TV: profili, Home, download e accessibilità',
