@@ -316,3 +316,71 @@ export function toTrack(it) {
     RunTimeTicks: it.duration ? it.duration * 1e7 : 0
   };
 }
+
+// Filtri della ricerca di YouTube Music (gli stessi del sito e della versione Android).
+export const searchParams = {
+  song: "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D",
+  album: "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D",
+  artist: "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D",
+  playlist: "EgeKAQQoADgBagoQAxAEEAoQCRAF"
+};
+
+export function searchPage(d) {
+  return { items: flatItems(d), next: continuation(d) };
+}
+
+// Coda "radio" di un brano (endpoint next): i brani correlati da accodare.
+export function radio(d) {
+  const out = [], seen = {};
+  walk(d, (m) => {
+    const r = m.playlistPanelVideoRenderer;
+    if (!r || !r.videoId || seen[r.videoId]) return;
+    seen[r.videoId] = true;
+    const runs = dig(r, ["longBylineText", "runs"]) || [];
+    const artists = [];
+    let album = null;
+    runs.forEach((run) => {
+      const b = browseOf(run.navigationEndpoint);
+      if (b && b.browseId.indexOf("UC") === 0) artists.push({ name: run.text, id: b.browseId });
+      else if (b && b.browseId.indexOf("MPREb") === 0) album = { name: run.text, id: b.browseId };
+    });
+    const byline = text(r.shortBylineText) || "";
+    out.push({
+      kind: "song",
+      title: text(r.title) || "",
+      subtitle: text(r.longBylineText) || byline,
+      videoId: r.videoId,
+      browseId: null,
+      params: null,
+      thumbnail: thumb(r.thumbnail),
+      artists: artists.length ? artists : byline ? [{ name: byline, id: null }] : [],
+      album,
+      duration: parseDuration(text(r.lengthText))
+    });
+  });
+  return out;
+}
+
+const refKind = { song: "track", album: "album", artist: "artist", playlist: "playlist" };
+
+// Riferimento salvabile (fissati, preferiti, ricerca) per un elemento YouTube.
+export function toRef(it) {
+  const kind = refKind[it.kind];
+  if (!kind) return null;
+  const names = artistNames(it);
+  const parts = it.subtitle.split(" • ").map((s) => s.trim()).filter(Boolean);
+  const year = (it.subtitle.match(/\b(19|20)\d{2}\b/) || [])[0];
+  return {
+    source: "youtube",
+    kind,
+    id: "youtube::" + (it.videoId || it.browseId),
+    title: it.title,
+    subtitle: kind === "artist" ? "Artista" : names || parts.filter((p) => !/^(Playlist|Album|Singolo|Single|EP|Brano|Song|Video)$/i.test(p))[0] || (kind === "playlist" ? "Playlist" : ""),
+    image: it.thumbnail,
+    year: kind === "album" && year ? Number(year) : null,
+    duration: it.duration || 0,
+    browseId: it.browseId,
+    params: it.params,
+    track: it.videoId ? toTrack(it) : null
+  };
+}

@@ -43,4 +43,32 @@ class YouTube(unittest.TestCase):
   bridge.streams.clear();bridge.streams[('abcdefghijk',False)]={'url':'u','ua':'x','client':'IOS','expire':bridge.time.time()+60}
   self.assertEqual(bridge.resolve('abcdefghijk')['url'],'u')
   bridge.forget('abcdefghijk');self.assertNotIn(('abcdefghijk',False),bridge.streams)
+class HomeAndPairing(unittest.TestCase):
+ def test_home_rows_use_fixed_sort_orders(self):
+  _,args=bridge.route('/api/library',{'kind':['MusicAlbum'],'sort':['recent']},'a'*32);self.assertEqual((args['SortBy'],args['SortOrder']),('DateCreated','Descending'))
+  _,args=bridge.route('/api/library',{'kind':['MusicAlbum'],'sort':['random']},'a'*32);self.assertEqual(args['SortBy'],'Random')
+  with self.assertRaises(ValueError):bridge.route('/api/library',{'kind':['MusicAlbum'],'sort':['Name,Path']},'a'*32)
+ def test_account_name_is_read_from_the_account_menu(self):
+  self.assertEqual(bridge.account_name({'actions':[{'x':{'activeAccountHeaderRenderer':{'accountName':{'runs':[{'text':'Fabio'}]}}}}]}),'Fabio')
+  self.assertIsNone(bridge.account_name({'actions':[]}))
+ def test_pairing_needs_the_code_and_closes_after_five_wrong_codes(self):
+  p=bridge.Pairing();p.server=object();p.code='123456';p.expires=bridge.time.time()+60
+  p.close_locked=lambda:None
+  for _ in range(4):self.assertFalse(p.submit('000000','SAPISID=x','')[0]);self.assertTrue(p.active())
+  self.assertFalse(p.submit('000000','SAPISID=x','')[0]);self.assertFalse(p.active())
+  self.assertIn('Troppi',p.status()['error'])
+  self.assertFalse(p.submit('123456','SAPISID=x','')[0])
+ def test_pairing_rejects_cookies_without_sapisid_and_saves_only_verified_ones(self):
+  import tempfile,os,json
+  d=tempfile.mkdtemp();old=bridge.YOUTUBE;bridge.YOUTUBE=os.path.join(d,'youtube.json');real=bridge.check_account
+  try:
+   p=bridge.Pairing();p.server=object();p.code='123456';p.expires=bridge.time.time()+60;p.close_locked=lambda:None
+   self.assertFalse(p.submit('123456','NID=1','')[0]);self.assertFalse(os.path.exists(bridge.YOUTUBE))
+   bridge.check_account=lambda account:None
+   self.assertFalse(p.submit('123456','SAPISID=x','')[0]);self.assertFalse(os.path.exists(bridge.YOUTUBE))
+   bridge.check_account=lambda account:'Fabio'
+   ok,note=p.submit('123456','SAPISID=x; A=1','brand||u');self.assertTrue(ok)
+   saved=json.load(open(bridge.YOUTUBE));self.assertEqual((saved['cookie'],saved['dataSyncId'],saved['name']),('SAPISID=x; A=1','brand||u','Fabio'))
+   self.assertEqual(oct(os.stat(bridge.YOUTUBE).st_mode&0o777),oct(0o600));self.assertEqual(p.status()['name'],'Fabio');self.assertFalse(p.active())
+  finally:bridge.YOUTUBE=old;bridge.check_account=real
 if __name__=='__main__':unittest.main()

@@ -3,7 +3,7 @@
 Server credentials and Google cookies remain in mode-0600 root files, never in media URLs.
 """
 from __future__ import print_function
-import os, sys, json, re, time, socket, subprocess, threading, ssl, base64, shutil, hashlib, signal
+import os, sys, json, re, time, socket, subprocess, threading, ssl, base64, shutil, hashlib, signal, random, hmac
 try:
     from http.server import BaseHTTPRequestHandler, HTTPServer
     from socketserver import ThreadingMixIn
@@ -20,7 +20,8 @@ STATE=os.path.join(ROOT,'bridge.json')
 CONNECTION=os.path.join(ROOT,'connection.json')
 YOUTUBE=os.path.join(ROOT,'youtube.json')
 PORT=18791
-VERSION=2
+VERSION=3
+PAIR_PORT=18793
 HEX=re.compile(r'^[a-fA-F0-9]{32}$')
 
 def read(path):
@@ -60,6 +61,11 @@ def route(path,query,user):
         if query.get('artist'):
             if not HEX.match(query['artist'][0]):raise ValueError('ID non valido')
             defaults['ArtistIds']=query['artist'][0]
+        # Righe della Home: aggiunti di recente e scelti a caso.
+        sort=query.get('sort',[''])[0]
+        if sort=='recent':defaults.update({'SortBy':'DateCreated','SortOrder':'Descending'})
+        elif sort=='random':defaults['SortBy']='Random'
+        elif sort:raise ValueError('Ordine non valido')
         return '/Users/'+user+'/Items',defaults
     m=re.match(r'^/api/item/([a-fA-F0-9]{32})$',path)
     if m:return '/Users/'+user+'/Items/'+m.group(1),{}
@@ -185,6 +191,107 @@ def resolve(video,skip=(),alt=False):
 def forget(video,alt=False):
     with streams_lock:streams.pop((video,alt),None)
 
+def account_name(data):
+    """Name in the account menu, or None when the cookie is not signed in."""
+    stack=[data]
+    while stack:
+        n=stack.pop()
+        if isinstance(n,dict):
+            h=n.get('activeAccountHeaderRenderer')
+            if isinstance(h,dict):
+                t=h.get('accountName') or {}
+                name=t.get('simpleText') or ''.join(r.get('text','') for r in t.get('runs',[]))
+                if name:return name
+            stack.extend(n.values())
+        elif isinstance(n,list):stack.extend(n)
+    return None
+
+def check_account(account):
+    body,query=yt_body('account/account_menu',{},account)
+    r=urlopen(Request(YT_ORIGIN+'/youtubei/v1/account/account_menu?'+urlencode(query),data=json.dumps(body).encode('utf-8'),headers=yt_headers(account)),timeout=25)
+    try:return account_name(json.loads(r.read().decode('utf-8')))
+    finally:r.close()
+
+def lan_address():
+    s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    try:
+        s.connect(('192.0.2.1',9));return s.getsockname()[0]
+    except Exception:return '127.0.0.1'
+    finally:s.close()
+
+PAIR_PAGE=u"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bloomee: accesso YouTube Music</title>
+<style>body{font:17px/1.5 system-ui,sans-serif;max-width:640px;margin:24px auto;padding:0 16px;background:#141116;color:#f5eef6}input,textarea,button{font:inherit;width:100%;box-sizing:border-box;margin:6px 0 16px;padding:12px;border-radius:10px;border:1px solid #57445d;background:#201a22;color:#f5eef6}textarea{height:160px}button{background:#ef88ba;color:#24131e;border:0;font-weight:700}ol{padding-left:20px}code{background:#302733;padding:1px 5px;border-radius:5px}</style></head><body>
+<h1>Accesso YouTube Music per Bloomee</h1>{note}
+<ol><li>Su un computer apri <b>music.youtube.com</b> con il tuo account.</li><li>Apri gli strumenti per sviluppatori (F12), scheda <b>Rete</b>, e scegli una richiesta a <code>youtubei/v1</code>.</li><li>Nelle intestazioni della richiesta copia tutto il valore di <code>cookie</code> e incollalo qui.</li></ol>
+<form method="post" action="/"><label>Codice mostrato sulla TV<input name="code" inputmode="numeric" autocomplete="off" required></label><label>Cookie<textarea name="cookie" required></textarea></label>
+<label>DATASYNC_ID (solo per account brand, facoltativo)<input name="dataSyncId" autocomplete="off"></label><button>Collega la TV</button></form>
+<p>Il cookie viaggia sulla rete di casa senza cifratura e sulla TV resta in un file leggibile solo da root. Per scollegarti usa Esci nelle impostazioni di Bloomee.</p></body></html>"""
+
+class Pairing(object):
+    """One-shot LAN page that hands a YouTube cookie to the TV, guarded by a code."""
+    def __init__(self):
+        self.lock=threading.Lock();self.server=None;self.code=None;self.expires=0;self.attempts=0;self.result={}
+    def start(self):
+        with self.lock:
+            self.close_locked()
+            self.code='%06d'%random.SystemRandom().randint(0,999999)
+            self.expires=time.time()+300;self.attempts=0;self.result={}
+            pairing=self
+            class PairHandler(BaseHTTPRequestHandler):
+                protocol_version='HTTP/1.0'
+                def log_message(self,*args):pass
+                def page(self,status,note):
+                    raw=PAIR_PAGE.replace(u'{note}',note).encode('utf-8')
+                    self.send_response(status);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(raw)));self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw)
+                def do_GET(self):
+                    if not pairing.active():return self.page(410,u'<p><b>Abbinamento scaduto.</b> Avvialo di nuovo dalla TV.</p>')
+                    self.page(200,u'')
+                def do_POST(self):
+                    size=int(self.headers.get('Content-Length') or 0)
+                    if size<=0 or size>16384:return self.page(400,u'<p><b>Richiesta non valida.</b></p>')
+                    form=parse_qs(self.rfile.read(size).decode('utf-8'))
+                    ok,note=pairing.submit(form.get('code',[''])[0].strip(),form.get('cookie',[''])[0].strip(),form.get('dataSyncId',[''])[0].strip())
+                    self.page(200 if ok else 400,note)
+            server=Server(('0.0.0.0',PAIR_PORT),PairHandler)
+            threading.Thread(target=server.serve_forever).start()
+            self.server=server
+            return {'url':'http://%s:%d/'%(lan_address(),PAIR_PORT),'code':self.code,'seconds':300}
+    def active(self):
+        return self.server is not None and time.time()<self.expires
+    def submit(self,code,cookie,data_sync):
+        with self.lock:
+            if not self.active():return False,u'<p><b>Abbinamento scaduto.</b> Avvialo di nuovo dalla TV.</p>'
+            if not hmac.compare_digest(code.encode('utf-8'),self.code.encode('utf-8')):
+                self.attempts+=1
+                if self.attempts>=5:self.expires=0;self.result={'error':'Troppi codici errati: abbinamento chiuso'}
+                return False,u'<p><b>Codice errato.</b></p>'
+        account={'cookie':cookie[:12000]}
+        if data_sync:account['dataSyncId']=data_sync[:200]
+        if not sapisid(cookie):return False,u'<p><b>Nel cookie manca SAPISID:</b> copia tutto il valore dell\u2019intestazione cookie.</p>'
+        try:name=check_account(account)
+        except Exception:name=None
+        if not name:return False,u'<p><b>Google non riconosce questo cookie.</b> Riprova dopo un nuovo accesso a music.youtube.com.</p>'
+        account['name']=name
+        save(YOUTUBE,account)
+        with self.lock:
+            self.result={'name':name};self.expires=0
+        return True,u'<p><b>Fatto: la TV \u00e8 collegata come %s.</b> Puoi chiudere questa pagina.</p>'%name.replace('<','&lt;')
+    def status(self):
+        with self.lock:
+            out={'active':self.active()}
+            out.update(self.result)
+            if not out['active'] and self.server is not None:self.close_locked()
+            return out
+    def close_locked(self):
+        # Called from the main bridge threads only, never from a pairing request.
+        if self.server is not None:
+            server=self.server;self.server=None
+            server.shutdown();server.server_close()
+    def close(self):
+        with self.lock:self.expires=0;self.close_locked()
+
+pairing=Pairing()
+
 class Server(ThreadingMixIn,HTTPServer):
     daemon_threads=True
     allow_reuse_address=True
@@ -205,6 +312,14 @@ class Handler(BaseHTTPRequestHandler):
         u=urlsplit(self.path);q=parse_qs(u.query)
         if not self.authorized(q):return self.reply(403,{'error':'Accesso negato'})
         if u.path.startswith('/yt/api/'):return self.youtube_api(u.path[len('/yt/api/'):])
+        if u.path=='/yt/pair/start':
+            try:return self.reply(200,pairing.start())
+            except Exception:return self.reply(503,{'error':'Abbinamento non disponibile: porta %d occupata'%PAIR_PORT})
+        if u.path=='/yt/pair/stop':pairing.close();return self.reply(200,{'ok':True})
+        if u.path=='/yt/logout':
+            pairing.close()
+            if os.path.exists(YOUTUBE):os.remove(YOUTUBE)
+            return self.reply(200,{'ok':True})
         if u.path not in ('/panel/off','/panel/on'):return self.reply(404,{'error':'Percorso non valido'})
         r=panel(u.path.endswith('/on'));self.reply(200 if r['ok'] else 503,r)
     def youtube_api(self,endpoint):
@@ -249,6 +364,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u=urlsplit(self.path);q=parse_qs(u.query)
         if not self.authorized(q):return self.reply(403,{'error':'Accesso negato'})
+        if u.path=='/yt/pair/status':return self.reply(200,pairing.status())
         if u.path=='/health':return self.reply(200,{'ok':True,'version':VERSION,'connected':os.path.exists(CONNECTION),'youtube':youtube_account() is not None})
         m=re.match(r'^/yt/audio/([A-Za-z0-9_-]{11})$',u.path)
         if m:return self.youtube_audio(m.group(1),q.get('alt')==['1'])

@@ -37,3 +37,16 @@ test('album tracks inherit cover, artist and album from the header',()=>{
 test('queue tracks carry the video id, never a stream URL',()=>{const t=yt.toTrack(yt.flatItems({contents:[song]})[0]);
  assert.equal(t.source,'youtube');assert.equal(t.videoId,'abcdefghijk');assert.deepEqual(t.Artists,['Laura Pausini']);assert.equal(t.RunTimeTicks,271e7);assert.ok(!/googlevideo|http/.test(t.Id));});
 test('account name comes from the active account header',()=>assert.equal(yt.accountName({actions:[{activeAccountHeaderRenderer:{accountName:runs('Fabio')}}]}),'Fabio'));
+test('radio queue items become playable songs without duplicates',()=>{
+ const item=(id)=>({playlistPanelVideoRenderer:{videoId:id,title:runs('Together Forever'),longBylineText:runs(artistRun('Rick Astley','UCrick'),' • ','2 Mln'),shortBylineText:runs('Rick Astley'),lengthText:runs('3:24'),thumbnail:{thumbnails:[{url:'https://i.ytimg.com/vi/x/hq.jpg'}]}}});
+ const songs=yt.radio({contents:[item('aaaaaaaaaaa'),item('aaaaaaaaaaa'),item('bbbbbbbbbbb')]});
+ assert.equal(songs.length,2);assert.deepEqual(songs[0].artists,[{name:'Rick Astley',id:'UCrick'}]);assert.equal(songs[0].duration,204);
+ assert.equal(yt.toTrack(songs[0]).videoId,'aaaaaaaaaaa');});
+test('references keep what favorites and pins need to reopen an item',()=>{
+ const [s]=yt.flatItems({contents:[song]});const r=yt.toRef(s);
+ assert.equal(r.kind,'track');assert.equal(r.id,'youtube::abcdefghijk');assert.equal(r.subtitle,'Laura Pausini');assert.equal(r.track.videoId,'abcdefghijk');
+ const a=yt.toRef(yt.flatItems({contents:[album]})[0]);assert.equal(a.kind,'album');assert.equal(a.browseId,'MPREbiocanto');
+ const withYear=yt.toRef(Object.assign({},yt.flatItems({contents:[album]})[0],{subtitle:'Album • Laura Pausini • 2006'}));assert.equal(withYear.year,2006);
+ assert.equal(yt.toRef({kind:'other',title:'x',subtitle:'',artists:[]}),null);});
+test('search pages carry their continuation',()=>{const p=yt.searchPage({contents:[song,{continuationItemRenderer:{continuationEndpoint:{continuationCommand:{token:'t'}}}}]});
+ assert.equal(p.items.length,1);assert.deepEqual(p.next,{token:'t',legacy:false});});
