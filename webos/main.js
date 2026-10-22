@@ -581,7 +581,7 @@ import { createScreenTimer } from "./screen-timer.js";
       bridge = JSON.parse(raw.trim());
       await api("/api/library", { kind: "MusicAlbum", limit: 1 });
       $("#connection").textContent = "Jellyfin collegato";
-      await navigate("albums", { back: true });
+      if (page !== "settings" && page !== "queue" && page !== "search") await navigate(page, { back: true });
     } catch (e) {
       $("#connection").textContent = "Collegamento non disponibile";
       empty("Collegamento alla musica non disponibile. Verifica il server Jellyfin e Homebrew Channel, poi scegli Riprova.");
