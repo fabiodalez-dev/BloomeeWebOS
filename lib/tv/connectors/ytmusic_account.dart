@@ -228,6 +228,7 @@ class YtMusicClient {
     String title = '';
     String? subtitle;
     String? thumb;
+    final albumArtists = <YtRef>[];
     _walk(d, (m) {
       for (final k in const [
         'musicResponsiveHeaderRenderer',
@@ -242,26 +243,27 @@ class YtMusicClient {
               .where((e) => e.isNotEmpty)
               .join(' · ');
           thumb = _thumb(h['thumbnail']);
+          albumArtists.addAll(headerArtists(h));
         }
       }
     });
     final tracks = (await _collectPages(d, 'browse'))
         .where((i) => i.videoId != null)
         .toList();
-    // Negli album i brani non hanno copertina propria: uso quella dell'album.
+    // Negli album i brani non hanno copertina né artista propri: uso quelli
+    // dell'album. L'artista viene dalla testata, non dal sottotitolo
+    // ("Album • 2006"), che non contiene il nome.
     final fixed = [
       for (final t in tracks)
-        t.thumbnail != null
+        t.thumbnail != null && t.artists.isNotEmpty
             ? t
             : YtItem(
                 kind: t.kind,
                 title: t.title,
                 subtitle: t.subtitle,
                 videoId: t.videoId,
-                thumbnail: thumb,
-                artists: t.artists.isEmpty && subtitle != null
-                    ? [YtRef(subtitle!.split(' · ').last, null)]
-                    : t.artists,
+                thumbnail: t.thumbnail ?? thumb,
+                artists: t.artists.isEmpty ? albumArtists : t.artists,
                 album: t.album ??
                     (browseId.startsWith('MPREb')
                         ? YtRef(title, browseId)
@@ -270,6 +272,30 @@ class YtMusicClient {
               ),
     ];
     return (title: title, subtitle: subtitle, thumbnail: thumb, tracks: fixed);
+  }
+
+  /// Artisti nella testata di un album: i link al canale nella riga sopra il
+  /// titolo o nel sottotitolo; altrimenti il testo della riga sopra.
+  static List<YtRef> headerArtists(Map header) {
+    final out = <YtRef>[];
+    for (final key in const ['straplineTextOne', 'subtitle']) {
+      final runs = header[key]?['runs'];
+      if (runs is! List) continue;
+      for (final run in runs) {
+        if (run is! Map) continue;
+        final bid = run['navigationEndpoint']?['browseEndpoint']?['browseId'];
+        if (bid is String &&
+            bid.startsWith('UC') &&
+            !out.any((a) => a.id == bid)) {
+          out.add(YtRef(run['text'] as String? ?? '', bid));
+        }
+      }
+    }
+    final strapline = _text(header['straplineTextOne']);
+    if (out.isEmpty && strapline != null && strapline.isNotEmpty) {
+      out.add(YtRef(strapline, null));
+    }
+    return out;
   }
 
   /// Pagina artista (funziona anche senza account).

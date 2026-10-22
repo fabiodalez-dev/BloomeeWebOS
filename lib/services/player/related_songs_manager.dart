@@ -22,6 +22,10 @@ class RelatedSongsManager {
   bool _isFetching = false;
   bool _isExhausted = false;
 
+  /// Cambia quando la coda o il brano di riferimento cambiano: una radio
+  /// arrivata dopo non appartiene più alla coda in ascolto.
+  int _generation = 0;
+
   // Callbacks
   Function(List<Track> items, {bool atLast})? onAddQueueItems;
 
@@ -62,16 +66,19 @@ class RelatedSongsManager {
       pluginId: parts.pluginId,
       localId: parts.localId,
     );
+    final generation = _generation;
 
     if (relatedSongs.value.isEmpty) {
       await _fetchNextRadioPage();
     }
+    if (generation != _generation) return;
 
     await loadRelatedSongs(
         queue: queue, currentPlayingIdx: currentPlayingIdx, loopMode: loopMode);
 
     if (relatedSongs.value.isEmpty) {
       await _fetchNextRadioPage();
+      if (generation != _generation) return;
       await loadRelatedSongs(
         queue: queue,
         currentPlayingIdx: currentPlayingIdx,
@@ -94,6 +101,7 @@ class RelatedSongsManager {
   }
 
   void clearRelatedSongs() {
+    _generation++;
     relatedSongs.add([]);
     _fetchedTrackIds.clear();
     _referenceTrackId = null;
@@ -113,6 +121,7 @@ class RelatedSongsManager {
       return;
     }
 
+    _generation++;
     relatedSongs.add([]);
     _fetchedTrackIds.clear();
     _referenceTrackId = trackId;
@@ -132,6 +141,7 @@ class RelatedSongsManager {
     }
 
     _isFetching = true;
+    final generation = _generation;
     try {
       final response = await _pluginService.execute(
         pluginId: _pluginId!,
@@ -143,6 +153,7 @@ class RelatedSongsManager {
         ),
       );
 
+      if (generation != _generation) return;
       response.when(
         moreTracks: (pagedTracks) {
           final uniqueTracks = pagedTracks.items.where((track) {
@@ -185,7 +196,7 @@ class RelatedSongsManager {
     } catch (e) {
       log('Failed to get related songs: $e', name: 'RelatedSongsManager');
     } finally {
-      _isFetching = false;
+      if (generation == _generation) _isFetching = false;
     }
   }
 

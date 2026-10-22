@@ -173,6 +173,13 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
     final providers = <String, TvSearchProvider>{};
     final deferred = <String, TvSearchProvider>{};
     bool current() => mounted && generation == _queryGeneration;
+    // Una pagina arrivata dopo il limite di tempo (o superata da una nuova
+    // richiesta) non deve spostare offset e token: la pagina successiva
+    // salterebbe risultati mai mostrati.
+    final calls = <String, int>{};
+    int begin(String key) => calls[key] = (calls[key] ?? 0) + 1;
+    bool accepted(String key, int call) =>
+        current() && calls[key] == call && _search.loading.contains(key);
     TvSearchHit hit(MediaItem item, String source,
         [Set<String> downloads = const {}]) {
       final ref = TvReference.item(item);
@@ -183,11 +190,12 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
       var offset = 0;
       final dao = TrackDAO(DBProvider.db);
       Future<List<TvSearchHit>> page(String query) async {
+        final call = begin('Locale');
         final rows = await dao.searchTracks(query, limit: 60, offset: offset);
         final downloads = await DownloadDAO(
                 DBProvider.db, dao, PlaylistDAO(DBProvider.db, dao))
             .getValidDownloads();
-        if (!current()) return [];
+        if (!accepted('Locale', call)) return [];
         offset += rows.length;
         if (rows.length == 60) {
           _more['Locale'] = page;
@@ -212,6 +220,7 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
         String? token;
         final tokens = <String>{};
         Future<List<TvSearchHit>> page(String query) async {
+          final call = begin(key);
           final result = await client.searchPage(query,
               kind: const {
                 'Brani': 'song',
@@ -220,7 +229,7 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
                 'Playlist': 'playlist'
               }[type],
               continuation: token);
-          if (!current()) return [];
+          if (!accepted(key, call)) return [];
           token = result.next;
           if (token != null && tokens.add(token!)) {
             _more[key] = page;
@@ -255,9 +264,10 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
         final key = 'Jellyfin · ${group.key}';
         var offset = 0;
         Future<List<TvSearchHit>> page(String query) async {
+          final call = begin(key);
           final items = await jf.search(query,
               start: offset, limit: 20, types: group.value);
-          if (!current()) return [];
+          if (!accepted(key, call)) return [];
           offset += items.length;
           if (items.length == 20) {
             _more[key] = page;
@@ -301,6 +311,7 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
         String? token;
         final tokens = <String>{};
         Future<List<TvSearchHit>> page(String query) async {
+          final call = begin(key);
           final result = await ServiceLocator.pluginService.execute(
               pluginId: pluginId,
               request: PluginRequest.contentResolver(
@@ -308,7 +319,7 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
                       query: query, filter: entry.value, pageToken: token)));
           if (result is! PluginResponse_Search)
             throw StateError('Risposta di ricerca non valida');
-          if (!current()) return [];
+          if (!accepted(key, call)) return [];
           token = result.field0.nextPageToken;
           if (token != null && tokens.add(token!)) {
             _more[key] = page;

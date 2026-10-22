@@ -300,6 +300,12 @@ expect("Indietro due volte torna alla ricerca con i risultati", (await heading()
 // Brano che non si riproduce: si passa al successivo
 await nav("home");
 await wait(600);
+await focusOn("#shuffle");
+await key("Enter");
+await enterTitle("Brano numero 3");
+expect("Un brano scelto non spegne Casuale", (await page.evaluate(() => document.getElementById("shuffle").getAttribute("aria-pressed"))) === "true");
+await focusOn("#shuffle");
+await key("Enter");
 await enterTitle("Brano numero 0");
 await wait(4500);
 // I brani finti durano un secondo: conta che l'ascolto sia andato avanti.

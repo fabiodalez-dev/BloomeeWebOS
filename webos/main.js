@@ -796,7 +796,8 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     const songs = items.filter((i) => i.videoId);
     if (!songs.length) return notify("Nessun brano da ascoltare");
     const first = Math.max(0, songs.indexOf(items[index]));
-    $("#shuffle").setAttribute("aria-pressed", String(shuffle = !!random));
+    // Come su Android: Casuale accende la modalità, un brano scelto la lascia com'è.
+    if (random) $("#shuffle").setAttribute("aria-pressed", String(shuffle = true));
     playList(songs.map(yt.toTrack), random ? Math.floor(Math.random() * songs.length) : first);
   }
   function openYt(it, list) {
