@@ -1,9 +1,12 @@
 import { chooseRemoteTarget } from "./remote-focus.js";
 import { createScreenTimer } from "./screen-timer.js";
+import * as yt from "./youtube.js";
 (function() {
   "use strict";
   const $ = (s) => document.querySelector(s), content = $("#content"), audio = $("#audio");
-  let bridge = null, page = "albums", history = [], currentItems = [], queue = [], current = -1, shuffle = false, repeat = false, generation = 0, loaded = 0, total = 0;
+  let bridge = null, page = "home", view = null, history = [], currentItems = [], queue = [], current = -1, shuffle = false, repeat = false, generation = 0, loaded = 0, total = 0;
+  let jellyfin = false, youtubeAccount = false, youtubeName = null, ytTab = "home", altTried = false;
+  const ytCache = /* @__PURE__ */ new Map();
   let settingsChoice = null;
   let prefs = { screenOff: 0 };
   try {
@@ -79,17 +82,59 @@ import { createScreenTimer } from "./screen-timer.js";
       clearTimeout(t);
     }
   }
+  async function ytApi(endpoint, body) {
+    const key = endpoint + JSON.stringify(body);
+    const hit = ytCache.get(key);
+    if (hit && Date.now() - hit.at < 3e5) return hit.data;
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 3e4);
+    try {
+      const r = await fetch(url("/yt/api/" + endpoint), { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "text/plain" }, signal: controller.signal });
+      const data = await r.json();
+      if (!r.ok) throw Error(data.error || "YouTube Music non disponibile");
+      if (ytCache.size > 40) ytCache.clear();
+      ytCache.set(key, { at: Date.now(), data });
+      return data;
+    } catch (e) {
+      throw e.name === "AbortError" ? Error("YouTube Music non risponde. Riprova tra poco.") : e;
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  // Elenco completo di una pagina YouTube, seguendo le pagine successive.
+  async function ytAll(endpoint, body, maxPages) {
+    let d = await ytApi(endpoint, body);
+    const first = d, items = [], seen = {}, tokens = {};
+    for (let n = 1; ; n++) {
+      yt.flatItems(d).forEach((it) => {
+        const k = it.videoId + "|" + it.browseId + "|" + it.title;
+        if (!seen[k]) {
+          seen[k] = true;
+          items.push(it);
+        }
+      });
+      const next = yt.continuation(d);
+      if (!next || tokens[next.token] || n >= (maxPages || 20)) break;
+      tokens[next.token] = true;
+      d = await ytApi(endpoint, { continuation: next.token, legacy: next.legacy });
+    }
+    return { first, items };
+  }
   const screen = createScreenTimer({ off: () => api("/panel/off", null, "POST"), on: () => api("/panel/on", null, "POST"), error: (e) => notify(e.message) });
   screen.configure(prefs.screenOff);
   function image(item) {
+    if (item.source === "youtube") return item.thumb || "placeholder.svg";
     const id = item.ImageTags && item.ImageTags.Primary ? item.Id : item.AlbumId || item.PrimaryImageItemId || item.Id;
     return url("/image/" + id);
   }
   function art(item) {
+    return picture(image(item));
+  }
+  function picture(src) {
     const img = node("img");
     img.alt = "";
     img.loading = "lazy";
-    img.src = image(item);
+    img.src = src || "placeholder.svg";
     img.onerror = () => {
       img.onerror = null;
       img.src = "placeholder.svg";
@@ -111,28 +156,30 @@ import { createScreenTimer } from "./screen-timer.js";
     $("#heading").textContent = title;
     $("#eyebrow").textContent = sub || "JELLYFIN";
   }
-  function loading() {
+  function loading(text) {
     content.textContent = "";
-    content.appendChild(node("p", "empty", "Caricamento della libreria\u2026"));
+    content.appendChild(node("p", "empty", text || "Caricamento della libreria\u2026"));
   }
   function empty(text) {
     content.textContent = "";
     content.appendChild(node("p", "empty", text));
   }
-  function remember(next) {
-    if (page !== next) history.push(page);
-    page = next;
+  // Ogni pagina sa ridisegnarsi: Indietro e Aggiorna richiamano render.
+  function show(id, render, options) {
+    if ((!options || !options.back) && view && view.page !== id && history.push(view) > 50) history.shift();
+    view = { page: id, render };
+    page = id;
+    settingsChoice = null;
+    return ++generation;
   }
   async function navigate(next, options) {
-    if (!options || !options.back) remember(next);
-    else page = next;
-    generation++;
-    const mark = generation;
+    const mark = show(next, () => navigate(next, { back: true }), options);
     document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("selected", b.dataset.page === next));
-    settingsChoice = null;
     if (next === "settings") return settings();
     if (next === "queue") return renderQueue();
     if (next === "search") return search();
+    if (next === "home") return ytHome(mark);
+    if (next === "youtube") return ytLibrary(mark);
     setHeading({ albums: "La tua musica", artists: "Artisti", tracks: "Tutti i brani", favorites: "I tuoi preferiti" }[next] || "Musica");
     loading();
     loaded = 0;
@@ -202,14 +249,13 @@ import { createScreenTimer } from "./screen-timer.js";
       content.appendChild(more);
     }
   }
-  async function openArtist(item) {
-    history.push(page);
-    page = "artist:" + item.Id;
-    generation++;
+  async function openArtist(item, options) {
+    const mark = show("artist:" + item.Id, () => openArtist(item, { back: true }), options);
     setHeading(item.Name, "ARTISTA");
     loading();
     try {
       const d = await library("albums", 0, { artist: item.Id });
+      if (mark !== generation) return;
       content.textContent = "";
       loaded = 0;
       total = d.Items.length;
@@ -217,13 +263,11 @@ import { createScreenTimer } from "./screen-timer.js";
       appendItems(d.Items, "albums");
       focusFirst();
     } catch (e) {
-      empty(e.message);
+      if (mark === generation) empty(e.message);
     }
   }
-  async function openAlbum(item) {
-    history.push(page);
-    page = "album:" + item.Id;
-    const mark = ++generation;
+  async function openAlbum(item, options) {
+    const mark = show("album:" + item.Id, () => openAlbum(item, { back: true }), options);
     setHeading("Album", artist(item));
     loading();
     try {
@@ -262,11 +306,14 @@ import { createScreenTimer } from "./screen-timer.js";
     $("#now-art").src = image(item);
     $("#now-title").textContent = item.Name;
     $("#now-artist").textContent = artist(item);
-    audio.src = url("/audio/" + item.Id);
+    altTried = false;
+    const src = item.source === "youtube" ? url("/yt/audio/" + item.videoId) : url("/audio/" + item.Id);
+    audio.src = src;
     try {
       await audio.play();
     } catch (e) {
-      notify("Riproduzione non riuscita. Prova un altro brano o verifica Jellyfin.");
+      // Gli errori del flusso li gestisce l'evento error, che può ripiegare su un altro formato.
+      if (audio.src === src && e.name !== "AbortError" && !audio.error) notify("Riproduzione non riuscita. Prova un altro brano o verifica " + (item.source === "youtube" ? "la connessione." : "Jellyfin."));
     }
     if (page === "queue") renderQueue();
   }
@@ -313,8 +360,18 @@ import { createScreenTimer } from "./screen-timer.js";
   });
   audio.addEventListener("ended", () => step(1));
   audio.addEventListener("error", () => {
+    const item = queue[current];
+    // Se la TV rifiuta l'AAC di YouTube, riprovo una volta con il formato Opus.
+    if (item && item.source === "youtube" && !altTried) {
+      altTried = true;
+      audio.src = url("/yt/audio/" + item.videoId, { alt: "1" });
+      audio.play().catch(() => {
+      });
+      return;
+    }
     screen.playing(false);
-    notify("Jellyfin non riesce a riprodurre questo brano.");
+    if (item && item.source === "youtube") api("/yt/stream/" + item.videoId).then(() => notify("La TV non riesce a riprodurre questo brano di YouTube."), (e) => notify("YouTube: " + e.message));
+    else notify("Jellyfin non riesce a riprodurre questo brano.");
   });
   audio.addEventListener("timeupdate", () => {
     const d = audio.duration || 0;
@@ -335,32 +392,63 @@ import { createScreenTimer } from "./screen-timer.js";
     });
     focusFirst();
   }
+  let lastSearch = "";
   function search() {
-    setHeading("Cerca nella tua musica");
+    setHeading("Cerca", "JELLYFIN E YOUTUBE MUSIC");
     content.textContent = "";
     const row = node("div", "search-row"), input = node("input");
     input.placeholder = "Album, artista o brano";
-    input.setAttribute("aria-label", "Cerca nella libreria");
+    input.setAttribute("aria-label", "Cerca nella tua musica e su YouTube Music");
+    input.value = lastSearch;
     const results = node("div");
-    async function run() {
-      const q = input.value.trim();
-      if (!q) return;
-      results.textContent = "Caricamento\u2026";
+    let runs = 0;
+    function block(title) {
+      const n = node("section", "search-block");
+      n.appendChild(node("h2", "source-title", title));
+      const body = node("div");
+      body.appendChild(node("p", "hint", "Caricamento…"));
+      n.appendChild(body);
+      results.appendChild(n);
+      return body;
+    }
+    async function searchLibrary(body, q, mark) {
       try {
         const responses = await Promise.all(["MusicAlbum", "MusicArtist", "Audio"].map((kind) => api("/api/library", { kind, search: q, limit: 20 })));
-        results.textContent = "";
+        if (mark !== runs) return;
+        body.textContent = "";
         responses.forEach((d, i) => {
           if (!d.Items.length) return;
-          results.appendChild(node("h2", "", ["Album", "Artisti", "Brani"][i]));
+          body.appendChild(node("h3", "", ["Album", "Artisti", "Brani"][i]));
           d.Items.forEach((item, j) => {
             const n = button(item.Name, () => i === 0 ? openAlbum(item) : i === 1 ? openArtist(item) : playList(d.Items, j), "track");
-            results.appendChild(n);
+            body.appendChild(n);
           });
         });
-        if (!results.children.length) results.appendChild(node("p", "empty", "Nessun risultato. Prova un titolo diverso."));
+        if (!body.children.length) body.appendChild(node("p", "hint", "Nessun risultato nella tua libreria."));
       } catch (e) {
-        results.textContent = e.message;
+        if (mark === runs) body.textContent = e.message;
       }
+    }
+    async function youtube(body, q, mark) {
+      try {
+        const sections = yt.parseSections(await ytApi("search", { query: q }));
+        if (mark !== runs) return;
+        body.textContent = "";
+        sections.forEach((section) => body.appendChild(ytSection(section, { limit: 8 })));
+        if (!sections.length) body.appendChild(node("p", "hint", "Nessun risultato su YouTube Music."));
+      } catch (e) {
+        if (mark === runs) body.textContent = e.message;
+      }
+    }
+    function run() {
+      const q = input.value.trim();
+      if (!q) return;
+      lastSearch = q;
+      const mark = ++runs;
+      results.textContent = "";
+      const local = jellyfin ? block("Nella tua libreria") : null, remote = block("Su YouTube Music");
+      if (local) searchLibrary(local, q, mark);
+      youtube(remote, q, mark);
     }
     input.onkeydown = (e) => {
       if (e.key === "Enter") {
@@ -373,6 +461,314 @@ import { createScreenTimer } from "./screen-timer.js";
     content.appendChild(row);
     content.appendChild(results);
     input.focus();
+    if (lastSearch) run();
+  }
+  // ── YouTube Music ───────────────────────────────────────────────────
+  function ytFail(mark, e, retry) {
+    if (mark !== generation) return;
+    empty(e.message);
+    if (retry) content.appendChild(button("Riprova", retry, "primary"));
+    focusFirst();
+  }
+  function ytPlay(items, index, random) {
+    const songs = items.filter((i) => i.videoId);
+    if (!songs.length) return notify("Nessun brano da ascoltare");
+    const start2 = Math.max(0, songs.indexOf(items[index]));
+    if (random) $("#shuffle").setAttribute("aria-pressed", String(shuffle = true));
+    playList(songs.map(yt.toTrack), random ? Math.floor(Math.random() * songs.length) : start2);
+  }
+  function openYt(it, list) {
+    if (it.kind === "song") return ytPlay(list, list.indexOf(it));
+    if (!it.browseId) return notify("Contenuto non disponibile");
+    if (it.kind === "artist") return openYtArtist(it.browseId, it.title);
+    if (it.kind === "album" || it.kind === "playlist") return openYtCollection(it.browseId, it.title);
+    openYtBrowse(it.browseId, it.params, it.title);
+  }
+  function ytCard(it, list) {
+    const n = button("", () => openYt(it, list), "album yt-card" + (it.kind === "artist" ? " circle" : ""));
+    n.appendChild(picture(it.thumbnail));
+    if (it.kind === "song") n.appendChild(node("i", "badge", "▶"));
+    n.appendChild(node("strong", "", it.title));
+    n.appendChild(node("span", "", it.kind === "artist" ? "Artista" : yt.artistNames(it) || it.subtitle));
+    return n;
+  }
+  function ytTracks(items, into) {
+    const songs = items.filter((i) => i.videoId), tracks = songs.map(yt.toTrack);
+    tracks.forEach((t, i) => into.appendChild(trackRow(t, i, tracks)));
+    return tracks;
+  }
+  function openSection(section) {
+    if (section.search) return openYtSearch(section.search, section.title);
+    if (section.more) openYtBrowse(section.more.browseId, section.more.params, section.title);
+  }
+  // Una riga: titolo (apre l'elenco completo quando esiste) e card in orizzontale.
+  function ytSection(section, options) {
+    const n = node("section", "yt-section");
+    const head = section.more || section.search ? button(section.title + "  ›", () => openSection(section), "section-title") : node("h3", "", section.title);
+    if (section.title || section.more || section.search) n.appendChild(head);
+    const items = options && options.limit ? section.items.slice(0, options.limit) : section.items;
+    if (section.shelf && items.every((i) => i.videoId)) {
+      const list = node("div", "yt-list");
+      ytTracks(items, list);
+      n.appendChild(list);
+    } else {
+      const shelf = node("div", "shelf");
+      items.forEach((it) => shelf.appendChild(ytCard(it, section.items)));
+      n.appendChild(shelf);
+    }
+    return n;
+  }
+  function ytItems(items, into) {
+    if (items.length && items.every((i) => i.videoId)) {
+      const actions = node("div", "actions");
+      actions.appendChild(button("▶ Ascolta", () => ytPlay(items, 0), "primary"));
+      actions.appendChild(button("⇄ Casuale", () => ytPlay(items, 0, true)));
+      actions.appendChild(button("+ In coda", () => {
+        queue = queue.concat(items.filter((i) => i.videoId).map(yt.toTrack));
+        notify(items.length + " brani aggiunti alla coda");
+      }));
+      into.appendChild(actions);
+      ytTracks(items, into);
+    } else {
+      const grid = node("div", "grid");
+      items.forEach((it) => grid.appendChild(ytCard(it, items)));
+      into.appendChild(grid);
+    }
+  }
+  async function ytHome(mark) {
+    setHeading("Home", "YOUTUBE MUSIC");
+    loading("Caricamento di YouTube Music…");
+    try {
+      const recent = youtubeAccount ? ytApi("browse", { browseId: "FEmusic_history" }).catch(() => null) : null;
+      let d = await ytApi("browse", { browseId: "FEmusic_home" });
+      const history2 = recent && await recent;
+      if (mark !== generation) return;
+      content.textContent = "";
+      const played = history2 ? yt.flatItems(history2).slice(0, 20) : [];
+      if (played.length) content.appendChild(ytSection({ title: "Ascoltati di recente", items: played, more: { browseId: "FEmusic_history", params: null }, search: null, shelf: false }));
+      const explore = node("div", "actions explore");
+      [["Novit\xE0 e tendenze", "FEmusic_explore"], ["Classifiche", "FEmusic_charts"], ["Generi e mood", "FEmusic_moods_and_genres"]].forEach(([label, id]) => explore.appendChild(button(label, () => openYtBrowse(id, null, label))));
+      const sections = yt.parseSections(d);
+      sections.forEach((s) => content.appendChild(ytSection(s)));
+      // La home continua a pagine: le sezioni successive arrivano su richiesta.
+      const more = (next) => {
+        if (!next) return;
+        const b = button("Altre sezioni", async () => {
+          b.disabled = true;
+          try {
+            d = await ytApi("browse", { continuation: next.token, legacy: next.legacy });
+            if (view.page !== "home") return;
+            const added = yt.parseSections(d);
+            b.remove();
+            added.forEach((s) => explore.parentNode.insertBefore(ytSection(s), explore));
+            more(yt.continuation(d));
+          } catch (e) {
+            notify(e.message);
+            b.disabled = false;
+          }
+        }, "more");
+        content.insertBefore(b, explore);
+      };
+      content.appendChild(explore);
+      more(yt.continuation(d));
+      if (!sections.length && !played.length) content.insertBefore(node("p", "empty", "YouTube Music non ha proposto contenuti. Prova Cerca o Classifiche."), explore);
+      focusFirst();
+    } catch (e) {
+      ytFail(mark, e, () => navigate("home", { back: true }));
+    }
+  }
+  const ytTabs = [["home", "Per te"], ["history", "Cronologia"], ["liked", "Mi piace"], ["playlists", "Playlist"], ["albums", "Album"], ["artists", "Artisti"]];
+  async function ytLibrary(mark) {
+    setHeading("Il mio YouTube", youtubeName ? youtubeName.toUpperCase() : "YOUTUBE MUSIC");
+    content.textContent = "";
+    if (!youtubeAccount) {
+      const note = node("article", "info-copy");
+      note.appendChild(node("h2", "", "Collega il tuo account"));
+      note.appendChild(node("p", "", "Home, ricerca, artisti, album e playlist di YouTube Music funzionano anche senza account. Per cronologia, Mi piace, playlist, album e artisti salvati copia i cookie di music.youtube.com da un browser in cui hai effettuato l'accesso."));
+      note.appendChild(node("p", "", "Sulla TV, come root, salvali in /var/lib/bloomee-webos/youtube.json con il campo cookie (facoltativi visitorData e dataSyncId), permessi 0600. Le istruzioni sono nel README di webOS."));
+      content.appendChild(note);
+      content.appendChild(button("Verifica di nuovo", async () => {
+        await checkYouTube();
+        if (view.page === "youtube") navigate("youtube", { back: true });
+      }, "primary"));
+      return focusFirst();
+    }
+    const tabs = node("div", "actions tabs"), body = node("div");
+    ytTabs.forEach(([id, label]) => {
+      const b = button(label, () => {
+        ytTab = id;
+        navigate("youtube", { back: true }).then(() => {
+          const pressed = content.querySelector(".tabs [aria-pressed=true]");
+          if (pressed) pressed.focus();
+        });
+      });
+      b.setAttribute("aria-pressed", String(ytTab === id));
+      tabs.appendChild(b);
+    });
+    content.appendChild(tabs);
+    content.appendChild(body);
+    body.appendChild(node("p", "empty", "Caricamento del tuo YouTube…"));
+    try {
+      if (ytTab === "home") {
+        const sections = yt.parseSections(await ytApi("browse", { browseId: "FEmusic_home" }));
+        if (mark !== generation) return;
+        body.textContent = "";
+        sections.forEach((s) => body.appendChild(ytSection(s)));
+        if (!sections.length) body.appendChild(node("p", "empty", "Nessun suggerimento per ora."));
+      } else {
+        const browseId = { history: "FEmusic_history", liked: "VLLM", playlists: "FEmusic_liked_playlists", albums: "FEmusic_liked_albums", artists: "FEmusic_library_corpus_artists" }[ytTab];
+        let items = (await ytAll("browse", { browseId })).items;
+        if (mark !== generation) return;
+        if (ytTab === "playlists") items = items.filter((i) => i.browseId);
+        if (ytTab === "artists") items = items.filter((i) => i.kind === "artist");
+        if (ytTab === "liked" || ytTab === "history") items = items.filter((i) => i.videoId);
+        body.textContent = "";
+        if (!items.length) body.appendChild(node("p", "empty", "Questo elenco \xE8 vuoto sul tuo account."));
+        else ytItems(items, body);
+      }
+    } catch (e) {
+      if (mark !== generation) return;
+      body.textContent = "";
+      body.appendChild(node("p", "empty", e.message));
+    }
+  }
+  async function openYtArtist(browseId, name, options) {
+    const mark = show("yt-artist:" + browseId, () => openYtArtist(browseId, name, { back: true }), options);
+    setHeading(name || "Artista", "ARTISTA \xB7 YOUTUBE MUSIC");
+    loading("Caricamento dell'artista…");
+    try {
+      const info = yt.artistInfo(await ytApi("browse", { browseId }));
+      if (mark !== generation) return;
+      content.textContent = "";
+      setHeading(info.name || name || "Artista", "ARTISTA \xB7 YOUTUBE MUSIC");
+      const head = node("div", "artist-head");
+      head.appendChild(picture(info.banner));
+      const about = node("div", "artist-about");
+      const facts = [info.monthlyListeners, info.subscribers ? info.subscribers + " iscritti" : null].filter(Boolean).join(" \xB7 ");
+      if (facts) about.appendChild(node("p", "facts", facts));
+      if (info.description) about.appendChild(node("p", "bio", info.description));
+      const songs = info.sections.filter((s) => s.items.some((i) => i.videoId))[0];
+      const actions = node("div", "actions");
+      if (songs) {
+        actions.appendChild(button("▶ Ascolta", () => ytPlay(songs.items, 0), "primary"));
+        actions.appendChild(button("⇄ Casuale", () => ytPlay(songs.items, 0, true)));
+      }
+      about.appendChild(actions);
+      head.appendChild(about);
+      content.appendChild(head);
+      info.sections.forEach((s) => content.appendChild(ytSection(s)));
+      if (!info.sections.length) content.appendChild(node("p", "empty", "YouTube Music non ha altri contenuti per questo artista."));
+      focusFirst();
+    } catch (e) {
+      ytFail(mark, e, () => openYtArtist(browseId, name, { back: true }));
+    }
+  }
+  async function openYtCollection(browseId, name, options) {
+    const mark = show("yt-list:" + browseId, () => openYtCollection(browseId, name, { back: true }), options);
+    const album = browseId.indexOf("MPREb") === 0;
+    setHeading(album ? "Album" : "Playlist", "YOUTUBE MUSIC");
+    loading();
+    try {
+      const all = await ytAll("browse", { browseId });
+      if (mark !== generation) return;
+      const info = yt.collectionInfo(all.first);
+      const items = yt.fillCollectionTracks(all.items, info, browseId);
+      content.textContent = "";
+      const detail = node("div", "detail"), cover = node("div", "cover-column"), list = node("div", "detail-list");
+      cover.appendChild(picture(info.thumbnail || items[0] && items[0].thumbnail));
+      cover.appendChild(node("h2", "", info.title || name || ""));
+      if (info.subtitle) cover.appendChild(node("p", "", info.subtitle));
+      if (items.length) ytItems(items, list);
+      else list.appendChild(node("p", "empty", "Nessun brano disponibile in questo elenco."));
+      detail.appendChild(cover);
+      detail.appendChild(list);
+      content.appendChild(detail);
+      focusFirst();
+    } catch (e) {
+      ytFail(mark, e, () => openYtCollection(browseId, name, { back: true }));
+    }
+  }
+  // Pagine generiche: classifiche, generi, discografia completa, "Mostra tutti".
+  async function openYtBrowse(browseId, params, name, options) {
+    if (/^(VL|MPREb|OLAK|PL)/.test(browseId) && !params) return openYtCollection(browseId, name, options);
+    if (browseId.indexOf("UC") === 0 && !params) return openYtArtist(browseId, name, options);
+    const mark = show("yt-browse:" + browseId + ":" + (params || ""), () => openYtBrowse(browseId, params, name, { back: true }), options);
+    setHeading(name || "YouTube Music", "YOUTUBE MUSIC");
+    loading("Caricamento di YouTube Music…");
+    try {
+      const body = params ? { browseId, params } : { browseId };
+      const d = await ytApi("browse", body);
+      const sections = yt.parseSections(d);
+      if (mark !== generation) return;
+      content.textContent = "";
+      if (sections.length > 1) sections.forEach((s) => content.appendChild(ytSection(s)));
+      else {
+        const all = await ytAll("browse", body);
+        if (mark !== generation) return;
+        content.textContent = "";
+        ytItems(all.items, content);
+      }
+      if (!content.children.length) empty("Nessun contenuto disponibile.");
+      focusFirst();
+    } catch (e) {
+      ytFail(mark, e, () => openYtBrowse(browseId, params, name, { back: true }));
+    }
+  }
+  async function openYtSearch(searchEndpoint, name, options) {
+    const mark = show("yt-search:" + searchEndpoint.query + ":" + searchEndpoint.params, () => openYtSearch(searchEndpoint, name, { back: true }), options);
+    setHeading(name || "Risultati", "CERCA \xB7 " + searchEndpoint.query.toUpperCase());
+    loading("Ricerca su YouTube Music…");
+    try {
+      let d = await ytApi("search", searchEndpoint.params ? { query: searchEndpoint.query, params: searchEndpoint.params } : { query: searchEndpoint.query });
+      if (mark !== generation) return;
+      content.textContent = "";
+      const items = yt.flatItems(d);
+      const list = node("div");
+      ytItems(items, list);
+      content.appendChild(list);
+      const more = (next) => {
+        if (!next) return;
+        const b = button("Altri risultati", async () => {
+          b.disabled = true;
+          try {
+            d = await ytApi("search", { continuation: next.token, legacy: next.legacy });
+            const added = yt.flatItems(d).filter((it) => !items.some((o) => o.videoId === it.videoId && o.browseId === it.browseId));
+            b.remove();
+            items.push.apply(items, added);
+            list.textContent = "";
+            ytItems(items, list);
+            more(yt.continuation(d));
+          } catch (e) {
+            notify(e.message);
+            b.disabled = false;
+          }
+        }, "more");
+        content.appendChild(b);
+      };
+      more(yt.continuation(d));
+      if (!items.length) empty("Nessun risultato.");
+      focusFirst();
+    } catch (e) {
+      ytFail(mark, e, () => openYtSearch(searchEndpoint, name, { back: true }));
+    }
+  }
+  async function checkYouTube() {
+    try {
+      const health = await api("/health");
+      youtubeAccount = !!health.youtube;
+      youtubeName = null;
+      if (youtubeAccount) youtubeName = yt.accountName(await ytApi("account/account_menu", {}));
+    } catch (e) {
+      if (youtubeAccount) notify(e.message);
+    }
+    updateConnection();
+    return youtubeAccount;
+  }
+  function updateConnection() {
+    const c = $("#connection");
+    c.textContent = "";
+    c.appendChild(node("span", "", jellyfin ? "Jellyfin collegato" : "Jellyfin non collegato"));
+    c.appendChild(node("span", "", youtubeAccount ? "YouTube: " + (youtubeName || "account collegato") : "YouTube Music senza account"));
   }
   function settings() {
     setHeading("Impostazioni", "BLOOMEE SU LG");
@@ -438,7 +834,19 @@ import { createScreenTimer } from "./screen-timer.js";
     row("Jellyfin", "Collegamento alla tua libreria musicale. Le credenziali restano private sulla TV.", button("Verifica", async () => {
       try {
         await api("/api/library", { kind: "MusicAlbum", limit: 1 });
+        jellyfin = true;
         notify("Jellyfin collegato");
+      } catch (e) {
+        jellyfin = false;
+        notify(e.message);
+      }
+      updateConnection();
+    }));
+    row("YouTube Music", youtubeAccount ? "Account collegato" + (youtubeName ? ": " + youtubeName : "") + ". Cronologia, Mi piace e playlist sono in Il mio YouTube." : "Home, ricerca e riproduzione funzionano senza account. Per la tua libreria aggiungi i cookie in /var/lib/bloomee-webos/youtube.json.", button("Verifica", async () => {
+      try {
+        await ytApi("browse", { browseId: "FEmusic_home" });
+        await checkYouTube();
+        notify(youtubeAccount ? "YouTube Music collegato" + (youtubeName ? " come " + youtubeName : "") : "YouTube Music raggiungibile, senza account");
       } catch (e) {
         notify(e.message);
       }
@@ -451,15 +859,15 @@ import { createScreenTimer } from "./screen-timer.js";
     focusFirst();
   }
   function showInfo() {
-    setHeading("Informazioni", "BLOOMEE SU LG \xB7 0.1.1");
+    setHeading("Informazioni", "BLOOMEE SU LG \xB7 0.2.0");
     content.textContent = "";
     const note = node("article", "info-copy");
     note.appendChild(node("h2", "", "La tua musica, sulla LG"));
-    note.appendChild(node("p", "", "Album, artisti, brani, ricerca, preferiti Jellyfin, coda, riproduzione casuale e ripetizione."));
+    note.appendChild(node("p", "", "Home, ricerca, artisti, album e playlist di YouTube Music, con cronologia, Mi piace e libreria del tuo account se colleghi i cookie. Album, artisti, brani e preferiti Jellyfin, ricerca unificata, coda, riproduzione casuale e ripetizione."));
     note.appendChild(node("h2", "", "Schermo e ascolto"));
     note.appendChild(node("p", "", "Sulla LG viene spento solo il pannello. La musica continua e il televisore rimane acceso. Su Android TV si usa uno schermo nero e la luminosit\xE0 minima, perch\xE9 lo spegnimento fisico non \xE8 disponibile alle app su tutte le TV."));
     note.appendChild(node("h2", "", "Sorgenti"));
-    note.appendChild(node("p", "", "Questa edizione usa Jellyfin. Plugin Android, accesso YouTube Music, Cast e download offline rimangono disponibili nella versione Android e non sono inclusi nel porting LG."));
+    note.appendChild(node("p", "", "Questa edizione usa Jellyfin e YouTube Music. L'accesso Google dalla TV, i Mi piace scritti sull'account, plugin Android, Cast e download offline rimangono disponibili nella versione Android e non sono inclusi nel porting LG."));
     content.appendChild(note);
     const close = button("Torna alle impostazioni", settings);
     close.id = "settings-info-back";
@@ -468,12 +876,15 @@ import { createScreenTimer } from "./screen-timer.js";
     content.scrollTop = 0;
   }
   function back() {
-    const next = history.pop() || "albums";
-    if (next.indexOf("album:") === 0 || next.indexOf("artist:") === 0) return navigate("albums", { back: true });
-    navigate(next, { back: true });
+    const previous = history.pop();
+    if (previous) previous.render();
+    else navigate("home", { back: true });
   }
   $("#back").onclick = back;
-  $("#refresh").onclick = () => navigate(page.indexOf(":") >= 0 ? "albums" : page, { back: true });
+  $("#refresh").onclick = () => {
+    ytCache.clear();
+    if (view) view.render();
+  };
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => navigate(b.dataset.page));
   function move(key) {
     const current2 = document.activeElement;
@@ -491,12 +902,29 @@ import { createScreenTimer } from "./screen-timer.js";
     }
     const all = Array.from(document.querySelectorAll('button,input,[tabindex="0"]')).filter((n) => n !== current2 && !n.disabled && n.getBoundingClientRect().width > 0 && n.getBoundingClientRect().height > 0);
     let pool = all;
-    if (within && (key === "ArrowDown" || key === "ArrowUp")) {
+    // Nelle righe orizzontali destra e sinistra restano nella riga.
+    const shelf = current2.closest(".shelf");
+    if (shelf && (key === "ArrowRight" || key === "ArrowLeft")) {
+      const cards = Array.from(shelf.querySelectorAll("button")).filter((n) => n !== current2);
+      const next = chooseRemoteTarget(rect, cards.map((n) => ({ element: n, rect: n.getBoundingClientRect() })), key);
+      if (next) {
+        next.focus();
+        next.scrollIntoView({ block: "nearest", inline: "nearest" });
+      } else if (key === "ArrowLeft" && document.querySelector("nav button.selected")) document.querySelector("nav button.selected").focus();
+      return;
+    }
+    if (within && (key === "ArrowDown" || key === "ArrowUp" || key === "ArrowLeft")) {
       const contentPool = all.filter((n) => content.contains(n));
       const target2 = chooseRemoteTarget(rect, contentPool.map((n) => ({ element: n, rect: n.getBoundingClientRect() })), key);
       if (target2) {
         target2.focus();
         target2.scrollIntoView({ block: "nearest", inline: "nearest" });
+        return;
+      }
+      // Dal bordo sinistro del contenuto si torna alla voce attiva del menu.
+      const selected = key === "ArrowLeft" && document.querySelector("nav button.selected");
+      if (selected) {
+        selected.focus();
         return;
       }
     }
@@ -579,16 +1007,19 @@ import { createScreenTimer } from "./screen-timer.js";
         }
       }
       bridge = JSON.parse(raw.trim());
-      await api("/api/library", { kind: "MusicAlbum", limit: 1 });
-      $("#connection").textContent = "Jellyfin collegato";
-      if (page !== "settings" && page !== "queue" && page !== "search") await navigate(page, { back: true });
     } catch (e) {
       $("#connection").textContent = "Collegamento non disponibile";
-      empty("Collegamento alla musica non disponibile. Verifica il server Jellyfin e Homebrew Channel, poi scegli Riprova.");
+      empty("Collegamento alla musica non disponibile. Verifica Homebrew Channel, poi scegli Riprova.");
       content.appendChild(button("Riprova", boot, "primary"));
+      return focusFirst();
     }
+    // Jellyfin e YouTube Music sono indipendenti: uno può mancare.
+    const libraryCheck = api("/api/library", { kind: "MusicAlbum", limit: 1 }).then(() => jellyfin = true, () => jellyfin = false);
+    await Promise.all([libraryCheck, checkYouTube()]);
+    updateConnection();
+    if (page !== "settings" && page !== "queue" && page !== "search") await navigate(page, { back: true });
   }
-  const iconPaths = { albums: "M4 4h16v16H4z M8 8h8v8H8z", artists: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-2a4 4 0 0 0-3-3.87", tracks: "M9 18V5l12-2v13 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M15 16a3 3 0 1 0 6 0 3 3 0 1 0-6 0", favorites: "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8", search: "M21 21l-5-5 M18 10a8 8 0 1 0-16 0 8 8 0 1 0 16 0", queue: "M4 6h16 M4 12h16 M4 18h16", settings: "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2" };
+  const iconPaths = { home: "M3 11l9-8 9 8 M5 9.5V21h14V9.5 M10 21v-6h4v6", youtube: "M3 6.5a2.5 2.5 0 0 1 2.5-2.5h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z M10 9l5 3-5 3z", albums: "M4 4h16v16H4z M8 8h8v8H8z", artists: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-2a4 4 0 0 0-3-3.87", tracks: "M9 18V5l12-2v13 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M15 16a3 3 0 1 0 6 0 3 3 0 1 0-6 0", favorites: "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8", search: "M21 21l-5-5 M18 10a8 8 0 1 0-16 0 8 8 0 1 0 16 0", queue: "M4 6h16 M4 12h16 M4 18h16", settings: "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2" };
   document.querySelectorAll("nav button").forEach((b) => {
     b.removeChild(b.firstChild);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

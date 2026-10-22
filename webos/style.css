@@ -498,3 +498,123 @@ nav svg {
 #time {
   font-size: 20px;
 }
+nav button {
+  padding: 13px 18px;
+  margin-bottom: 4px;
+}
+.brand {
+  padding-bottom: 26px;
+}
+#connection span {
+  display: block;
+}
+.yt-section {
+  margin: 0 0 34px;
+}
+.yt-section h3,
+.search-block h3 {
+  font-size: 30px;
+  margin: 0 0 18px;
+}
+.section-title {
+  display: inline-block;
+  background: transparent;
+  font-size: 30px;
+  font-weight: 700;
+  padding: 8px 14px;
+  margin: 0 0 10px -14px;
+}
+.shelf {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 10px 10px 14px;
+  margin: 0 -10px;
+  scroll-padding: 10px;
+}
+.shelf::-webkit-scrollbar {
+  display: none;
+}
+.shelf .yt-card {
+  flex: 0 0 236px;
+  width: 236px;
+  margin-right: 26px;
+}
+.yt-card {
+  position: relative;
+}
+.yt-card.circle img {
+  border-radius: 50%;
+}
+.yt-card .badge {
+  position: absolute;
+  top: 182px;
+  left: 14px;
+  width: 42px;
+  height: 42px;
+  line-height: 42px;
+  border-radius: 50%;
+  text-align: center;
+  font-style: normal;
+  font-size: 18px;
+  background: rgba(20, 17, 22, .78);
+  color: var(--ink);
+}
+.yt-list .track:nth-child(even) {
+  background: #201a22;
+}
+.tabs {
+  flex-wrap: wrap;
+}
+.tabs button,
+.explore button {
+  margin-bottom: 14px;
+}
+.explore {
+  margin-top: 10px;
+}
+.artist-head {
+  display: flex;
+  align-items: flex-start;
+  margin: 0 0 36px;
+}
+.artist-head img {
+  width: 300px;
+  height: 300px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 50%;
+  background: #302733;
+  margin-right: 52px;
+}
+.artist-about {
+  flex: 1;
+  min-width: 0;
+}
+.artist-about .facts {
+  color: var(--accent);
+  font-size: 24px;
+  margin: 8px 0 14px;
+}
+.artist-about .bio {
+  color: var(--muted);
+  font-size: 23px;
+  line-height: 1.5;
+  max-height: 5.9em;
+  overflow: hidden;
+  margin: 0 0 24px;
+}
+.search-block {
+  margin: 0 0 40px;
+}
+.source-title {
+  font-size: 18px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 22px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 24px;
+}

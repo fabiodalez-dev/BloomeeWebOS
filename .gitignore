@@ -146,6 +146,7 @@ app.*.symbols
 android/.kotlin/
 # Generated webOS bundle and Python bytecode
 webos/app.js
+webos/node_modules/
 webos/__pycache__/
 webos/*.pyc
 /release-webos/
