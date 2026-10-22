@@ -71,4 +71,33 @@ class HomeAndPairing(unittest.TestCase):
    saved=json.load(open(bridge.YOUTUBE));self.assertEqual((saved['cookie'],saved['dataSyncId'],saved['name']),('SAPISID=x; A=1','brand||u','Fabio'))
    self.assertEqual(oct(os.stat(bridge.YOUTUBE).st_mode&0o777),oct(0o600));self.assertEqual(p.status()['name'],'Fabio');self.assertFalse(p.active())
   finally:bridge.YOUTUBE=old;bridge.check_account=real
+class ReviewFixes(unittest.TestCase):
+ def setUp(self):
+  import tempfile,os
+  self.d=tempfile.mkdtemp();self.old=bridge.YOUTUBE;bridge.YOUTUBE=os.path.join(self.d,'youtube.json');self.real=bridge.check_account
+ def tearDown(self):bridge.YOUTUBE=self.old;bridge.check_account=self.real
+ def pairing(self):
+  p=bridge.Pairing();p.server=object();p.code='123456';p.expires=bridge.time.time()+60;p.close_locked=lambda:None;return p
+ def test_the_code_can_be_typed_as_shown_on_the_tv(self):
+  bridge.check_account=lambda account:'Fabio'
+  p=self.pairing();self.assertTrue(p.submit('123 456','SAPISID=x','')[0]);self.assertEqual(p.attempts,0)
+ def test_closing_on_the_tv_during_the_google_check_discards_the_cookie(self):
+  import os
+  p=self.pairing()
+  def slow(account):p.close();return 'Fabio'
+  bridge.check_account=slow
+  ok,note=p.submit('123456','SAPISID=x','');self.assertFalse(ok);self.assertIn('chiuso',note);self.assertFalse(os.path.exists(bridge.YOUTUBE))
+ def test_refused_videos_are_not_asked_again_for_ten_minutes(self):
+  calls=[];real=bridge.urlopen
+  class R(object):
+   def read(self):return b'{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Conferma di non essere un bot"}}'
+   def close(self):pass
+  def fake(req,timeout=0):calls.append(1);return R()
+  bridge.urlopen=fake;bridge.refused.clear();bridge.streams.clear()
+  try:
+   for alt in (False,True,False):
+    with self.assertRaises(LookupError) as e:bridge.resolve('zzzzzzzzzzz',(),alt)
+    self.assertIn('bot',e.exception.args[0])
+   self.assertEqual(len(calls),len(bridge.YT_PLAYERS))
+  finally:bridge.urlopen=real;bridge.refused.clear()
 if __name__=='__main__':unittest.main()

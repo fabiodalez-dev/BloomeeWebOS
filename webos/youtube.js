@@ -155,7 +155,7 @@ export function itemsOf(contents) {
   return Array.isArray(contents) ? contents.map(itemOf).filter(Boolean) : [];
 }
 
-const itemKey = (it) => it.videoId + "|" + it.browseId + "|" + it.title;
+export const itemKey = (it) => it.videoId + "|" + it.browseId + "|" + it.title;
 
 export function flatItems(d) {
   const out = [], seen = {};
@@ -263,7 +263,7 @@ export function artistInfo(d) {
 
 // Intestazione di album e playlist.
 export function collectionInfo(d) {
-  const info = { title: "", subtitle: "", thumbnail: null };
+  const info = { title: "", subtitle: "", thumbnail: null, artists: [] };
   walk(d, (m) => {
     ["musicResponsiveHeaderRenderer", "musicDetailHeaderRenderer", "musicEditablePlaylistDetailHeaderRenderer"].forEach((k) => {
       const h = m[k];
@@ -271,6 +271,13 @@ export function collectionInfo(d) {
       info.title = text(h.title) || "";
       info.subtitle = [text(h.straplineTextOne), text(h.subtitle)].filter(Boolean).join(" · ");
       info.thumbnail = thumb(h.thumbnail, 544);
+      // Artista dell'album: i link al canale nella riga sopra o nel sottotitolo
+      // ("Album • Artista • 2006"); altrimenti il testo della riga sopra.
+      (dig(h, ["straplineTextOne", "runs"]) || []).concat(dig(h, ["subtitle", "runs"]) || []).forEach((run) => {
+        const b = browseOf(run.navigationEndpoint);
+        if (b && b.browseId.indexOf("UC") === 0 && !info.artists.some((a) => a.id === b.browseId)) info.artists.push({ name: run.text, id: b.browseId });
+      });
+      if (!info.artists.length && text(h.straplineTextOne)) info.artists.push({ name: text(h.straplineTextOne), id: null });
     });
   });
   return info;
@@ -278,14 +285,12 @@ export function collectionInfo(d) {
 
 // Negli album i brani non hanno copertina né artista propri: uso quelli dell'album.
 export function fillCollectionTracks(tracks, info, browseId) {
-  return tracks.filter((t) => t.videoId).map((t) => {
-    if (t.thumbnail) return t;
-    return Object.assign({}, t, {
-      thumbnail: info.thumbnail,
-      artists: t.artists.length || !info.subtitle ? t.artists : [{ name: info.subtitle.split(" · ").pop(), id: null }],
-      album: t.album || (browseId.indexOf("MPREb") === 0 ? { name: info.title, id: browseId } : null)
-    });
-  });
+  const album = browseId.indexOf("MPREb") === 0;
+  return tracks.filter((t) => t.videoId).map((t) => Object.assign({}, t, {
+    thumbnail: t.thumbnail || info.thumbnail,
+    artists: t.artists.length ? t.artists : info.artists || [],
+    album: t.album || (album ? { name: info.title, id: browseId } : null)
+  }));
 }
 
 export function accountName(d) {

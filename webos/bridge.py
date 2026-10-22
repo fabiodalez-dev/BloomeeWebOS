@@ -94,6 +94,9 @@ YT_PLAYERS=[
 YT_ITAGS=(140,141,251,250,249,139)
 YT_ITAGS_ALT=(251,250,249,140,141,139)
 streams={}
+# Videos YouTube refuses (region, age, bot check): remembered for ten minutes
+# so the Opus retry and the error report do not repeat every player call.
+refused={}
 streams_lock=threading.Lock()
 
 def youtube_account():
@@ -143,8 +146,8 @@ def yt_headers(account,now=None):
         h['Authorization']='SAPISIDHASH '+ts+'_'+hashlib.sha1((ts+' '+sap+' '+YT_ORIGIN).encode('utf-8')).hexdigest()
     return h
 
-def yt_api(endpoint,data):
-    account=youtube_account()
+def yt_api(endpoint,data,account=None):
+    account=youtube_account() if account is None else account
     body,query=yt_body(endpoint,data,account)
     request=Request(YT_ORIGIN+'/youtubei/v1/'+endpoint+'?'+urlencode(query),data=json.dumps(body).encode('utf-8'),headers=yt_headers(account))
     response=urlopen(request,timeout=25)
@@ -164,6 +167,8 @@ def resolve(video,skip=(),alt=False):
     with streams_lock:
         hit=streams.get(key)
         if hit and hit['expire']>time.time() and hit['client'] not in skip:return hit
+        no=refused.get(video)
+        if no and no[0]>time.time() and not skip:raise LookupError(no[1])
     reason=None
     for client,ua,number in YT_PLAYERS:
         if client['clientName'] in skip:continue
@@ -186,6 +191,10 @@ def resolve(video,skip=(),alt=False):
             if len(streams)>60:streams.clear()
             streams[key]=hit
         return hit
+    if reason and not skip:
+        with streams_lock:
+            if len(refused)>200:refused.clear()
+            refused[video]=(time.time()+600,reason)
     raise LookupError(reason or 'Brano YouTube non disponibile')
 
 def forget(video,alt=False):
@@ -207,10 +216,7 @@ def account_name(data):
     return None
 
 def check_account(account):
-    body,query=yt_body('account/account_menu',{},account)
-    r=urlopen(Request(YT_ORIGIN+'/youtubei/v1/account/account_menu?'+urlencode(query),data=json.dumps(body).encode('utf-8'),headers=yt_headers(account)),timeout=25)
-    try:return account_name(json.loads(r.read().decode('utf-8')))
-    finally:r.close()
+    return account_name(json.loads(yt_api('account/account_menu',{},account).decode('utf-8')))
 
 def lan_address():
     s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
@@ -230,10 +236,10 @@ PAIR_PAGE=u"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta n
 class Pairing(object):
     """One-shot LAN page that hands a YouTube cookie to the TV, guarded by a code."""
     def __init__(self):
-        self.lock=threading.Lock();self.server=None;self.code=None;self.expires=0;self.attempts=0;self.result={}
+        self.lock=threading.Lock();self.server=None;self.code=None;self.expires=0;self.attempts=0;self.result={};self.session=0
     def start(self):
         with self.lock:
-            self.close_locked()
+            self.close_locked();self.session+=1
             self.code='%06d'%random.SystemRandom().randint(0,999999)
             self.expires=time.time()+300;self.attempts=0;self.result={}
             pairing=self
@@ -259,8 +265,11 @@ class Pairing(object):
     def active(self):
         return self.server is not None and time.time()<self.expires
     def submit(self,code,cookie,data_sync):
+        # The TV shows the code as "123 456": spaces and dashes are not part of it.
+        code=re.sub(r'[^0-9]','',code)
         with self.lock:
             if not self.active():return False,u'<p><b>Abbinamento scaduto.</b> Avvialo di nuovo dalla TV.</p>'
+            session=self.session
             if not hmac.compare_digest(code.encode('utf-8'),self.code.encode('utf-8')):
                 self.attempts+=1
                 if self.attempts>=5:self.expires=0;self.result={'error':'Troppi codici errati: abbinamento chiuso'}
@@ -272,8 +281,10 @@ class Pairing(object):
         except Exception:name=None
         if not name:return False,u'<p><b>Google non riconosce questo cookie.</b> Riprova dopo un nuovo accesso a music.youtube.com.</p>'
         account['name']=name
-        save(YOUTUBE,account)
         with self.lock:
+            # Chiudi abbinamento or Esci on the TV during the Google check wins.
+            if self.session!=session or not self.active():return False,u'<p><b>Abbinamento chiuso dalla TV.</b> Il cookie non \u00e8 stato salvato.</p>'
+            save(YOUTUBE,account)
             self.result={'name':name};self.expires=0
         return True,u'<p><b>Fatto: la TV \u00e8 collegata come %s.</b> Puoi chiudere questa pagina.</p>'%name.replace('<','&lt;')
     def status(self):
@@ -288,7 +299,7 @@ class Pairing(object):
             server=self.server;self.server=None
             server.shutdown();server.server_close()
     def close(self):
-        with self.lock:self.expires=0;self.close_locked()
+        with self.lock:self.expires=0;self.session+=1;self.close_locked()
 
 pairing=Pairing()
 
@@ -371,8 +382,9 @@ class Handler(BaseHTTPRequestHandler):
         m=re.match(r'^/yt/stream/([A-Za-z0-9_-]{11})$',u.path)
         if m:
             # The media element cannot read error bodies: the app asks here why a stream failed.
-            try:resolve(m.group(1));return self.reply(200,{'ok':True})
+            try:resolve(m.group(1),(),q.get('alt')==['1']);return self.reply(200,{'ok':True})
             except LookupError as e:return self.reply(404,{'error':e.args[0]})
+            except Exception:return self.reply(502,{'error':'YouTube non risponde'})
         try:
             c=read(CONNECTION)
             if not HEX.match(c['userId']):raise ValueError('Utente non valido')
@@ -391,10 +403,11 @@ def stop(state):
     try:
         pid=int(state.get('pid',0))
         if b'bridge.py' not in open('/proc/%s/cmdline'%pid,'rb').read():return
-        os.kill(pid,signal.SIGTERM)
-        for _ in range(30):
-            time.sleep(.1)
-            if not os.path.exists('/proc/%s'%pid):return
+        for sig in (signal.SIGTERM,signal.SIGKILL):
+            os.kill(pid,sig)
+            for _ in range(30):
+                time.sleep(.1)
+                if not os.path.exists('/proc/%s'%pid):return
     except Exception:pass
 
 def ensure():
@@ -416,8 +429,9 @@ def ensure():
         time.sleep(.1)
         try:
             s=read(STATE)
-            json.loads(urlopen('http://127.0.0.1:%s/health?key=%s'%(s['port'],s['key']),timeout=1).read().decode('utf-8'))
-            print(json.dumps(s));return
+            data=json.loads(urlopen('http://127.0.0.1:%s/health?key=%s'%(s['port'],s['key']),timeout=1).read().decode('utf-8'))
+            # Only this version: an old bridge that is still answering lacks the YouTube routes.
+            if data.get('version')==VERSION:print(json.dumps(s));return
         except Exception:pass
     raise RuntimeError('Bridge non avviato')
 

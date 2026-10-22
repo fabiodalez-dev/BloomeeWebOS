@@ -34,6 +34,13 @@ test('album tracks inherit cover, artist and album from the header',()=>{
  const page={header:{musicResponsiveHeaderRenderer:{title:runs('Io canto'),straplineTextOne:runs('Laura Pausini'),thumbnail:thumbs('https://lh3/e')}},contents:[bare,album]};
  const info=yt.collectionInfo(page),tracks=yt.fillCollectionTracks(yt.flatItems(page),info,'MPREbiocanto');
  assert.equal(tracks.length,1);assert.equal(tracks[0].thumbnail,'https://lh3/e=w544-h544');assert.deepEqual(tracks[0].artists,[{name:'Laura Pausini',id:null}]);assert.deepEqual(tracks[0].album,{name:'Io canto',id:'MPREbiocanto'});});
+test('album artist comes from the strapline or channel links, never from the type and year',()=>{
+ const bare=JSON.parse(JSON.stringify(song));delete bare.musicResponsiveListItemRenderer.thumbnail;bare.musicResponsiveListItemRenderer.flexColumns.length=1;
+ const withSubtitle={header:{musicResponsiveHeaderRenderer:{title:runs('Io canto'),straplineTextOne:runs('Laura Pausini'),subtitle:runs('Album',' • ','2006'),thumbnail:thumbs('https://lh3/e')}},contents:[bare]};
+ assert.deepEqual(yt.fillCollectionTracks(yt.flatItems(withSubtitle),yt.collectionInfo(withSubtitle),'MPREb1')[0].artists,[{name:'Laura Pausini',id:null}]);
+ const linked={header:{musicDetailHeaderRenderer:{title:runs('Io canto'),subtitle:runs('Album',' • ',artistRun('Laura Pausini','UCp'),' • ','2006'),thumbnail:thumbs('https://lh3/e')}},contents:[bare]};
+ assert.deepEqual(yt.fillCollectionTracks(yt.flatItems(linked),yt.collectionInfo(linked),'MPREb1')[0].artists,[{name:'Laura Pausini',id:'UCp'}]);
+ const own=yt.fillCollectionTracks(yt.flatItems({contents:[song]}),yt.collectionInfo(linked),'VLx')[0];assert.deepEqual(own.artists,[{name:'Laura Pausini',id:'UCartist'}]);assert.equal(own.album.id,'MPREbalbum');});
 test('queue tracks carry the video id, never a stream URL',()=>{const t=yt.toTrack(yt.flatItems({contents:[song]})[0]);
  assert.equal(t.source,'youtube');assert.equal(t.videoId,'abcdefghijk');assert.deepEqual(t.Artists,['Laura Pausini']);assert.equal(t.RunTimeTicks,271e7);assert.ok(!/googlevideo|http/.test(t.Id));});
 test('account name comes from the active account header',()=>assert.equal(yt.accountName({actions:[{activeAccountHeaderRenderer:{accountName:runs('Fabio')}}]}),'Fabio'));

@@ -26,11 +26,12 @@ const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 const shots = process.env.BLOOMEE_SHOTS;
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-const state = { loggedIn: false, polls: 0 };
+const state = { loggedIn: false, polls: 0, name: "Fabio Test", nextName: "Fabio Test" };
 await page.route("http://127.0.0.1:18791/**", async (route) => {
   const u = new URL(route.request().url()), p = u.pathname;
   const json = (data, status) => route.fulfill({ status: status || 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(data) });
   if (p === "/health") return json({ ok: true, version: 3, connected: true, youtube: state.loggedIn });
+  if (p === "/yt/api/account/account_menu") return json({ actions: [{ header: { activeAccountHeaderRenderer: { accountName: { runs: [{ text: state.name }] } } } }] });
   if (p.indexOf("/yt/api/") === 0) return json(fx.youtube(p.slice(8), JSON.parse(route.request().postData() || "{}")));
   if (p === "/api/library") return json(fx.jellyfin(u.searchParams));
   if (p === "/yt/pair/start") {
@@ -40,13 +41,16 @@ await page.route("http://127.0.0.1:18791/**", async (route) => {
   if (p === "/yt/pair/status") {
     if (++state.polls < 2) return json({ active: true });
     state.loggedIn = true;
-    return json({ active: false, name: "Fabio Test" });
+    state.name = state.nextName;
+    return json({ active: false, name: state.name });
   }
   if (p === "/yt/logout") {
     state.loggedIn = false;
     return json({ ok: true });
   }
   if (p.indexOf("/image/") === 0) return route.fulfill({ contentType: "image/svg+xml", body: decodeURIComponent(fx.svg(1).split(",")[1]) });
+  if (p === "/yt/audio/" + fx.vid(0)) return json({ error: "Questo video non \xE8 disponibile" }, 404);
+  if (p === "/yt/stream/" + fx.vid(0)) return json({ error: "Questo video non \xE8 disponibile" }, 404);
   if (p.indexOf("/audio/") === 0 || p.indexOf("/yt/audio/") === 0) return route.fulfill({ contentType: "audio/wav", headers: { "Access-Control-Allow-Origin": "*" }, body: fx.silence() });
   return json({ ok: true });
 });
@@ -77,9 +81,14 @@ async function key(k, n) {
     await wait(90);
   }
 }
+// Come un telecomando vero: il tasto tenuto giù continua a mandare OK ripetuti.
 async function longPress() {
   await page.keyboard.down("Enter");
-  await wait(750);
+  for (let i = 0; i < 12; i++) {
+    await wait(80);
+    await page.keyboard.down("Enter");
+  }
+  await wait(150);
   await page.keyboard.up("Enter");
   await wait(200);
 }
@@ -200,8 +209,10 @@ await audit("Home senza account");
 await key("ArrowRight", 3);
 const heroTitle = await heading();
 expect("Home: destra resta nella riga", await page.evaluate(() => !!document.activeElement.closest(".shelf")));
+const pinsBefore = await page.evaluate(() => window.bloomee.library.pins().length);
 await longPress();
 expect("OK prolungato apre il menu", await page.evaluate(() => !!document.querySelector(".dialog")));
+expect("OK ripetuti non scelgono da soli la prima voce del menu", (await page.evaluate(() => window.bloomee.library.pins().length)) === pinsBefore);
 await audit("Menu OK prolungato");
 await key("Escape");
 expect("Indietro chiude il menu e il focus torna alla copertina", await page.evaluate(() => !document.querySelector(".dialog") && !!document.activeElement.closest(".shelf")));
@@ -286,6 +297,13 @@ await settle();
 await key("Escape");
 await settle();
 expect("Indietro due volte torna alla ricerca con i risultati", (await heading()) === "Cerca" && await page.evaluate(() => /Brani/.test(document.querySelector(".search-results").textContent)), await heading());
+// Brano che non si riproduce: si passa al successivo
+await nav("home");
+await wait(600);
+await enterTitle("Brano numero 0");
+await wait(4500);
+// I brani finti durano un secondo: conta che l'ascolto sia andato avanti.
+expect("Brano non riproducibile: si passa ai successivi", /^Brano numero [1-9]$/.test(await page.evaluate(() => document.getElementById("now-title").textContent)), await page.evaluate(() => document.getElementById("now-title").textContent));
 // Player
 await focusOn("#seek");
 await key("ArrowLeft");
@@ -318,6 +336,11 @@ await audit("Impostazioni");
 await enter("Mai");
 await audit("Impostazioni con scelta tempo aperta");
 await key("Escape");
+state.nextName = "Secondo Account";
+await enter("Cambia account");
+await wait(4500);
+await settle();
+expect("Cambia account: il nome nuovo compare subito", await page.evaluate(() => /Secondo Account/.test(document.getElementById("connection").textContent)), await page.evaluate(() => document.getElementById("connection").textContent));
 await enter("Esci");
 await audit("Conferma uscita");
 await key("Escape");
