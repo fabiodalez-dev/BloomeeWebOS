@@ -33,11 +33,11 @@ class YouTube(unittest.TestCase):
   self.assertEqual(h['Cookie'],account['cookie']);self.assertEqual(h['X-Goog-Visitor-Id'],'v')
   body,_=bridge.yt_body('browse',{'browseId':'FEmusic_home'},account);self.assertEqual(body['context']['user'],{'onBehalfOfUser':'brand'})
   self.assertNotIn('Cookie',bridge.yt_headers(None));self.assertNotIn('Authorization',bridge.yt_headers({'cookie':'NID=1'}))
- def test_audio_prefers_aac_and_skips_signed_formats(self):
-  player={'streamingData':{'adaptiveFormats':[{'itag':251,'mimeType':'audio/webm','url':'o'},{'itag':140,'mimeType':'audio/mp4','signatureCipher':'s'},{'itag':139,'mimeType':'audio/mp4','url':'low'},{'itag':137,'mimeType':'video/mp4','url':'v'}]}}
-  self.assertEqual(bridge.pick_audio(player)['url'],'o')
-  player['streamingData']['adaptiveFormats'][1]['url']='aac'
-  self.assertEqual(bridge.pick_audio(player)['url'],'aac');self.assertEqual(bridge.pick_audio(player,alt=True)['url'],'o')
+ def test_audio_prefers_opus_and_skips_signed_formats(self):
+  player={'streamingData':{'adaptiveFormats':[{'itag':251,'mimeType':'audio/webm','signatureCipher':'s'},{'itag':140,'mimeType':'audio/mp4','url':'aac'},{'itag':139,'mimeType':'audio/mp4','url':'low'},{'itag':137,'mimeType':'video/mp4','url':'v'}]}}
+  self.assertEqual(bridge.pick_audio(player)['url'],'aac')
+  player['streamingData']['adaptiveFormats'][0]['url']='o'
+  self.assertEqual(bridge.pick_audio(player)['url'],'o');self.assertEqual(bridge.pick_audio(player,alt=True)['url'],'aac')
   self.assertIsNone(bridge.pick_audio({'streamingData':{'adaptiveFormats':[{'itag':137,'mimeType':'video/mp4','url':'v'}]}}))
  def test_cached_streams_are_reused_until_they_expire(self):
   bridge.streams.clear();bridge.streams[('abcdefghijk',False)]={'url':'u','ua':'x','client':'IOS','expire':bridge.time.time()+60}
@@ -75,7 +75,8 @@ class ReviewFixes(unittest.TestCase):
  def setUp(self):
   import tempfile,os
   self.d=tempfile.mkdtemp();self.old=bridge.YOUTUBE;bridge.YOUTUBE=os.path.join(self.d,'youtube.json');self.real=bridge.check_account
- def tearDown(self):bridge.YOUTUBE=self.old;bridge.check_account=self.real
+  self.real_visitor=bridge.visitor_data;bridge.visitor_data=lambda:'vd'
+ def tearDown(self):bridge.YOUTUBE=self.old;bridge.check_account=self.real;bridge.visitor_data=self.real_visitor
  def pairing(self):
   p=bridge.Pairing();p.server=object();p.code='123456';p.expires=bridge.time.time()+60;p.close_locked=lambda:None;return p
  def test_the_code_can_be_typed_as_shown_on_the_tv(self):
@@ -123,12 +124,12 @@ class ReviewFixes(unittest.TestCase):
    with self.assertRaises(LookupError) as e:bridge.resolve('yyyyyyyyyyy')
    self.assertIn('bot',e.exception.args[0]);self.assertNotIn('yyyyyyyyyyy',bridge.refused)
    answers['IOS']=ok;del calls[:]
-   self.assertEqual(bridge.resolve('yyyyyyyyyyy')['client'],'IOS');self.assertEqual(calls,['IOS'])
+   self.assertEqual(bridge.resolve('yyyyyyyyyyy')['client'],'IOS');self.assertEqual(calls,['VISIONOS','IOS'])
   finally:bridge.urlopen=real;bridge.refused.clear();bridge.streams.clear()
  def test_android_answers_when_ios_fails(self):
   names=[c['clientName'] for c,_,_ in bridge.YT_PLAYERS]
-  self.assertEqual(names[:3],['IOS','ANDROID','ANDROID_VR'])
-  client,ua,number=bridge.YT_PLAYERS[1]
+  self.assertEqual(names[:4],['VISIONOS','IOS','ANDROID','ANDROID_VR'])
+  client,ua,number=bridge.YT_PLAYERS[2]
   self.assertEqual((client['clientVersion'],client['androidSdkVersion'],number),('20.10.38',30,'3'));self.assertIn('com.google.android.youtube/20.10.38',ua)
   ok={'playabilityStatus':{'status':'OK'},'streamingData':{'adaptiveFormats':[{'itag':140,'mimeType':'audio/mp4','url':'https://x/a?expire=%d'%(bridge.time.time()+7200)}]}}
   bot={'playabilityStatus':{'status':'LOGIN_REQUIRED','reason':'bot'}}
@@ -136,8 +137,35 @@ class ReviewFixes(unittest.TestCase):
   fake,calls=self.fake_players(answers);real=bridge.urlopen
   bridge.urlopen=fake;bridge.refused.clear();bridge.streams.clear()
   try:
-   hit=bridge.resolve('xxxxxxxxxxx');self.assertEqual(hit['client'],'ANDROID');self.assertEqual(hit['ua'],ua);self.assertEqual(calls,['IOS','ANDROID'])
+   hit=bridge.resolve('xxxxxxxxxxx');self.assertEqual(hit['client'],'ANDROID');self.assertEqual(hit['ua'],ua);self.assertEqual(calls,['VISIONOS','IOS','ANDROID'])
   finally:bridge.urlopen=real;bridge.refused.clear();bridge.streams.clear()
+class Visitor(unittest.TestCase):
+ def setUp(self):self.real=bridge.urlopen;bridge.visitor.update(value=None,at=0)
+ def tearDown(self):bridge.urlopen=self.real;bridge.visitor.update(value=None,at=0)
+ def test_visionos_comes_first_and_every_player_call_carries_the_visitor_id(self):
+  self.assertEqual(bridge.YT_PLAYERS[0][0]['clientName'],'VISIONOS');self.assertEqual(bridge.YT_PLAYERS[0][2],'101')
+  seen=[]
+  class R(object):
+   def __init__(self,data):self.data=data
+   def read(self):return self.data
+   def close(self):pass
+  page=b'<script>ytcfg.set({"VISITOR_DATA":"Cgt2aXNpdG9y","X":1});</script>'
+  ok=bridge.json.dumps({'playabilityStatus':{'status':'OK'},'streamingData':{'adaptiveFormats':[{'itag':140,'mimeType':'audio/mp4','url':'https://x/a?expire=%d'%(bridge.time.time()+7200)}]}}).encode('utf-8')
+  def fake(req,timeout=0):
+   if req.data is None:seen.append('page');return R(page)
+   body=bridge.json.loads(req.data.decode('utf-8'));seen.append((body['context']['client']['clientName'],body['context']['client'].get('visitorData'),req.get_header('X-goog-visitor-id')))
+   return R(ok)
+  bridge.urlopen=fake;bridge.streams.clear();bridge.refused.clear()
+  try:
+   hit=bridge.resolve('vvvvvvvvvvv');self.assertEqual(hit['client'],'VISIONOS')
+   self.assertEqual(seen,['page',('VISIONOS','Cgt2aXNpdG9y','Cgt2aXNpdG9y')])
+   bridge.streams.clear();del seen[:];bridge.resolve('wwwwwwwwwww')
+   self.assertEqual(seen,[('VISIONOS','Cgt2aXNpdG9y','Cgt2aXNpdG9y')])
+  finally:bridge.streams.clear()
+ def test_without_a_visitor_id_the_players_are_still_asked(self):
+  def fail(req,timeout=0):raise IOError('offline')
+  bridge.urlopen=fail
+  self.assertIsNone(bridge.visitor_data())
 class Network(unittest.TestCase):
  def test_connections_try_ipv4_before_ipv6(self):
   import socket,threading

@@ -1,6 +1,6 @@
 {
   "id": "org.bloomee.webos",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "vendor": "Bloomee contributors",
   "type": "web",
   "main": "index.html",
