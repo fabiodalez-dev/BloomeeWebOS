@@ -100,4 +100,42 @@ class ReviewFixes(unittest.TestCase):
     self.assertIn('bot',e.exception.args[0])
    self.assertEqual(len(calls),len(bridge.YT_PLAYERS))
   finally:bridge.urlopen=real;bridge.refused.clear()
+ def fake_players(self,answers):
+  """urlopen that answers each player client from a table: an exception is raised, a dict is returned as JSON."""
+  calls=[]
+  class R(object):
+   def __init__(self,data):self.data=data
+   def read(self):return bridge.json.dumps(self.data).encode('utf-8')
+   def close(self):pass
+  def fake(req,timeout=0):
+   name=bridge.json.loads(req.data.decode('utf-8'))['context']['client']['clientName'];calls.append(name)
+   answer=answers[name]
+   if isinstance(answer,Exception):raise answer
+   return R(answer)
+  return fake,calls
+ def test_a_failed_client_does_not_mark_the_video_as_refused(self):
+  bot={'playabilityStatus':{'status':'LOGIN_REQUIRED','reason':'Accedi per confermare di non essere un bot'}}
+  ok={'playabilityStatus':{'status':'OK'},'streamingData':{'adaptiveFormats':[{'itag':140,'mimeType':'audio/mp4','url':'https://x/a?expire=%d'%(bridge.time.time()+7200)}]}}
+  answers=dict((c['clientName'],bot) for c,_,_ in bridge.YT_PLAYERS);answers['IOS']=IOError('timed out');answers['ANDROID']=IOError('timed out')
+  fake,calls=self.fake_players(answers);real=bridge.urlopen
+  bridge.urlopen=fake;bridge.refused.clear();bridge.streams.clear()
+  try:
+   with self.assertRaises(LookupError) as e:bridge.resolve('yyyyyyyyyyy')
+   self.assertIn('bot',e.exception.args[0]);self.assertNotIn('yyyyyyyyyyy',bridge.refused)
+   answers['IOS']=ok;del calls[:]
+   self.assertEqual(bridge.resolve('yyyyyyyyyyy')['client'],'IOS');self.assertEqual(calls,['IOS'])
+  finally:bridge.urlopen=real;bridge.refused.clear();bridge.streams.clear()
+ def test_android_answers_when_ios_fails(self):
+  names=[c['clientName'] for c,_,_ in bridge.YT_PLAYERS]
+  self.assertEqual(names[:3],['IOS','ANDROID','ANDROID_VR'])
+  client,ua,number=bridge.YT_PLAYERS[1]
+  self.assertEqual((client['clientVersion'],client['androidSdkVersion'],number),('20.10.38',30,'3'));self.assertIn('com.google.android.youtube/20.10.38',ua)
+  ok={'playabilityStatus':{'status':'OK'},'streamingData':{'adaptiveFormats':[{'itag':140,'mimeType':'audio/mp4','url':'https://x/a?expire=%d'%(bridge.time.time()+7200)}]}}
+  bot={'playabilityStatus':{'status':'LOGIN_REQUIRED','reason':'bot'}}
+  answers=dict((n,bot) for n in names);answers['IOS']=IOError('timed out');answers['ANDROID']=ok
+  fake,calls=self.fake_players(answers);real=bridge.urlopen
+  bridge.urlopen=fake;bridge.refused.clear();bridge.streams.clear()
+  try:
+   hit=bridge.resolve('xxxxxxxxxxx');self.assertEqual(hit['client'],'ANDROID');self.assertEqual(hit['ua'],ua);self.assertEqual(calls,['IOS','ANDROID'])
+  finally:bridge.urlopen=real;bridge.refused.clear();bridge.streams.clear()
 if __name__=='__main__':unittest.main()

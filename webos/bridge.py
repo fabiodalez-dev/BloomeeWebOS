@@ -20,7 +20,7 @@ STATE=os.path.join(ROOT,'bridge.json')
 CONNECTION=os.path.join(ROOT,'connection.json')
 YOUTUBE=os.path.join(ROOT,'youtube.json')
 PORT=18791
-VERSION=3
+VERSION=4
 PAIR_PORT=18793
 HEX=re.compile(r'^[a-fA-F0-9]{32}$')
 
@@ -86,6 +86,8 @@ YT_FIELDS=('query','params','continuation','browseId','videoId','playlistId')
 YT_PLAYERS=[
     ({'clientName':'IOS','clientVersion':'20.10.4','deviceMake':'Apple','deviceModel':'iPhone16,2','osName':'iPhone','osVersion':'18.3.2.22D82'},
      'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)','5'),
+    ({'clientName':'ANDROID','clientVersion':'20.10.38','androidSdkVersion':30,'osName':'Android','osVersion':'11'},
+     'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip','3'),
     ({'clientName':'ANDROID_VR','clientVersion':'1.65.10','deviceMake':'Oculus','deviceModel':'Quest 3','androidSdkVersion':32,'osName':'Android','osVersion':'12L'},
      'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip','28'),
 ]
@@ -170,6 +172,9 @@ def resolve(video,skip=(),alt=False):
         no=refused.get(video)
         if no and no[0]>time.time() and not skip:raise LookupError(no[1])
     reason=None
+    # Remembered as refused only when every client said no: a timeout or an
+    # answer without a usable stream says nothing about the video itself.
+    certain=True
     for client,ua,number in YT_PLAYERS:
         if client['clientName'] in skip:continue
         c=dict(client);c.update({'hl':'it','gl':'IT'})
@@ -179,19 +184,21 @@ def resolve(video,skip=(),alt=False):
                 headers={'Content-Type':'application/json','User-Agent':ua,'X-YouTube-Client-Name':number,'X-YouTube-Client-Version':client['clientVersion']}),timeout=20)
             try:player=json.loads(r.read().decode('utf-8'))
             finally:r.close()
-        except Exception:continue
+        except Exception:
+            certain=False;continue
         status=player.get('playabilityStatus') or {}
         if status.get('status')!='OK':
             reason=status.get('reason') or reason;continue
         f=pick_audio(player,alt)
-        if not f:continue
+        if not f:
+            certain=False;continue
         m=re.search(r'[?&]expire=(\d+)',f['url'])
         hit={'url':f['url'],'ua':ua,'client':client['clientName'],'expire':(int(m.group(1)) if m else time.time()+3600)-300}
         with streams_lock:
             if len(streams)>60:streams.clear()
             streams[key]=hit
         return hit
-    if reason and not skip:
+    if reason and certain and not skip:
         with streams_lock:
             if len(refused)>200:refused.clear()
             refused[video]=(time.time()+600,reason)
