@@ -1,6 +1,6 @@
 {
   "id": "org.bloomee.webos",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "vendor": "Bloomee contributors",
   "type": "web",
   "main": "index.html",
@@ -12,6 +12,5 @@
   "disableBackHistoryAPI": true,
   "requiredPermissions": [
     "all"
-  ],
-  "handlesRelaunch": true
+  ]
 }
