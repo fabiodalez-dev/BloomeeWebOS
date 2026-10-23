@@ -20,9 +20,18 @@ STATE=os.path.join(ROOT,'bridge.json')
 CONNECTION=os.path.join(ROOT,'connection.json')
 YOUTUBE=os.path.join(ROOT,'youtube.json')
 PORT=18791
-VERSION=4
+VERSION=5
 PAIR_PORT=18793
 HEX=re.compile(r'^[a-fA-F0-9]{32}$')
+
+# googlevideo.com answers with an IPv6 address first, but on home networks
+# without an IPv6 route every connection waited the whole 20 s timeout before
+# trying IPv4. Connections try IPv4 addresses first and IPv6 after them.
+_getaddrinfo=getattr(socket.getaddrinfo,'original',socket.getaddrinfo)
+def getaddrinfo(*args,**kwargs):
+    return sorted(_getaddrinfo(*args,**kwargs),key=lambda a:a[0]!=socket.AF_INET)
+getaddrinfo.original=_getaddrinfo
+socket.getaddrinfo=getaddrinfo
 
 def read(path):
     with open(path) as f:return json.load(f)

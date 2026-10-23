@@ -138,4 +138,23 @@ class ReviewFixes(unittest.TestCase):
   try:
    hit=bridge.resolve('xxxxxxxxxxx');self.assertEqual(hit['client'],'ANDROID');self.assertEqual(hit['ua'],ua);self.assertEqual(calls,['IOS','ANDROID'])
   finally:bridge.urlopen=real;bridge.refused.clear();bridge.streams.clear()
+class Network(unittest.TestCase):
+ def test_connections_try_ipv4_before_ipv6(self):
+  import socket,threading
+  v6=(socket.AF_INET6,socket.SOCK_STREAM,6,'',('100::1',443,0,0))
+  listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(1);port=listener.getsockname()[1]
+  v4=(socket.AF_INET,socket.SOCK_STREAM,6,'',('127.0.0.1',port))
+  calls=[];real=bridge._getaddrinfo
+  def fake(host,*a,**k):calls.append(host);return [v6,v4] if host=='rr1.googlevideo.test' else [v6]
+  bridge._getaddrinfo=fake
+  try:
+   self.assertIs(socket.getaddrinfo,bridge.getaddrinfo)
+   self.assertEqual(socket.getaddrinfo('rr1.googlevideo.test',443),[v4,v6])
+   # An IPv6-only host keeps its address.
+   self.assertEqual(socket.getaddrinfo('ipv6only.test',443),[v6])
+   # urllib connects through socket.create_connection: it must reach IPv4 without waiting for IPv6.
+   start=bridge.time.time();c=socket.create_connection(('rr1.googlevideo.test',port),timeout=5)
+   self.assertEqual(c.getpeername(),('127.0.0.1',port));self.assertLess(bridge.time.time()-start,1);c.close()
+   self.assertIn('rr1.googlevideo.test',calls)
+  finally:bridge._getaddrinfo=real;listener.close()
 if __name__=='__main__':unittest.main()
