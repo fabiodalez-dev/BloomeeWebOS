@@ -736,7 +736,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   audio.addEventListener("ended", () => step(1));
   audio.addEventListener("error", () => {
     const item = queue[current];
-    // Se la TV rifiuta l'AAC di YouTube, riprovo una volta con il formato Opus.
+    // Se la TV rifiuta il primo formato di YouTube (Opus), riprovo una volta con l'AAC.
     if (item && item.source === "youtube" && !altTried) {
       altTried = true;
       audio.src = url("/yt/audio/" + item.videoId, { alt: "1" });

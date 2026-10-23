@@ -20,7 +20,7 @@ STATE=os.path.join(ROOT,'bridge.json')
 CONNECTION=os.path.join(ROOT,'connection.json')
 YOUTUBE=os.path.join(ROOT,'youtube.json')
 PORT=18791
-VERSION=5
+VERSION=6
 PAIR_PORT=18793
 HEX=re.compile(r'^[a-fA-F0-9]{32}$')
 
@@ -92,7 +92,14 @@ YT_ENDPOINTS=('search','browse','next','account/account_menu')
 YT_FIELDS=('query','params','continuation','browseId','videoId','playlistId')
 # Clients whose player responses carry direct, unsigned audio URLs. The first
 # one that answers is used; a refused stream falls through to the next.
+# VISIONOS (with an anonymous visitorData, see visitor_data) serves URLs that
+# play to the end. IOS and ANDROID still answer, but since October 2026
+# googlevideo refuses their URLs after the first megabyte without a PO token,
+# and the TV's media player asks for the whole file: they are only a fallback.
+YT_VISIONOS_UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'
 YT_PLAYERS=[
+    ({'clientName':'VISIONOS','clientVersion':'1.02','deviceMake':'Apple','deviceModel':'RealityDevice17,1','userAgent':YT_VISIONOS_UA,'osName':'visionOS','osVersion':'26.5.23O471'},
+     YT_VISIONOS_UA,'101'),
     ({'clientName':'IOS','clientVersion':'20.10.4','deviceMake':'Apple','deviceModel':'iPhone16,2','osName':'iPhone','osVersion':'18.3.2.22D82'},
      'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)','5'),
     ({'clientName':'ANDROID','clientVersion':'20.10.38','androidSdkVersion':30,'osName':'Android','osVersion':'11'},
@@ -100,10 +107,31 @@ YT_PLAYERS=[
     ({'clientName':'ANDROID_VR','clientVersion':'1.65.10','deviceMake':'Oculus','deviceModel':'Quest 3','androidSdkVersion':32,'osName':'Android','osVersion':'12L'},
      'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip','28'),
 ]
-# AAC first: every webOS media pipeline plays it. The alternative order, Opus
-# first, is requested by the app when the TV refuses the AAC stream.
-YT_ITAGS=(140,141,251,250,249,139)
-YT_ITAGS_ALT=(251,250,249,140,141,139)
+# Opus (WebM) first: on webOS 5 the media player seeks in it, while in
+# YouTube's fragmented AAC (DASH m4a) a seek starts the song again. The
+# alternative order, AAC first, is requested by the app when the TV refuses
+# the Opus stream.
+YT_ITAGS=(251,250,249,140,141,139)
+YT_ITAGS_ALT=(140,141,251,250,249,139)
+# Anonymous visitor id, read from the youtube.com page as a browser gets it.
+# Without it VISIONOS answers "Accedi per confermare di non essere un bot".
+YT_VISITOR_TTL=6*3600
+visitor={'value':None,'at':0}
+visitor_lock=threading.Lock()
+
+def visitor_data():
+    with visitor_lock:
+        if visitor['value'] and time.time()-visitor['at']<YT_VISITOR_TTL:return visitor['value']
+    try:
+        r=urlopen(Request('https://www.youtube.com/',headers={'User-Agent':YT_UA,'Accept-Language':'it-IT'}),timeout=15)
+        try:page=r.read().decode('utf-8','replace')
+        finally:r.close()
+        m=re.search(r'"VISITOR_DATA":"([^"]+)"',page)
+    except Exception:m=None
+    with visitor_lock:
+        if m:visitor.update(value=m.group(1),at=time.time())
+        return visitor['value']
+
 streams={}
 # Videos YouTube refuses (region, age, bot check): remembered for ten minutes
 # so the Opus retry and the error report do not repeat every player call.
@@ -184,13 +212,16 @@ def resolve(video,skip=(),alt=False):
     # Remembered as refused only when every client said no: a timeout or an
     # answer without a usable stream says nothing about the video itself.
     certain=True
+    vd=visitor_data()
     for client,ua,number in YT_PLAYERS:
         if client['clientName'] in skip:continue
         c=dict(client);c.update({'hl':'it','gl':'IT'})
+        headers={'Content-Type':'application/json','User-Agent':ua,'X-YouTube-Client-Name':number,'X-YouTube-Client-Version':client['clientVersion']}
+        if vd:c['visitorData']=vd;headers['X-Goog-Visitor-Id']=vd
         body={'context':{'client':c},'videoId':video,'contentCheckOk':True,'racyCheckOk':True}
         try:
             r=urlopen(Request('https://www.youtube.com/youtubei/v1/player?prettyPrint=false',data=json.dumps(body).encode('utf-8'),
-                headers={'Content-Type':'application/json','User-Agent':ua,'X-YouTube-Client-Name':number,'X-YouTube-Client-Version':client['clientVersion']}),timeout=20)
+                headers=headers),timeout=20)
             try:player=json.loads(r.read().decode('utf-8'))
             finally:r.close()
         except Exception:
