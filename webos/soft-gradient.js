@@ -2,13 +2,13 @@
 // patches of colour that melt into each other and drift very slowly over a
 // dark ground. No edges anywhere. With the music they breathe: the bass
 // swells them and lifts their light, louder passages move them a little
-// faster, never in a hurry. Along the bottom, the spectrum as a soft wave of
-// light: bass in the middle, highs towards the sides.
+// faster, never in a hurry. The "Spettro" ones add, along the bottom, the
+// spectrum as a soft wave of light: bass in the middle, highs at the sides.
 export const BANDS = 32;
 const VS = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
 const FS = [
   "precision mediump float;",
-  "uniform vec2 res;uniform float t,beat,bass,glow;uniform vec3 base,c0,c1,c2,c3,c4;uniform float spec[32];",
+  "uniform vec2 res;uniform float t,beat,bass,glow,wave;uniform vec3 base,c0,c1,c2,c3,c4;uniform float spec[32];",
   "float hash(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}",
   "vec3 acc;float wsum;",
   "void blob(vec3 c,float k,vec2 p){",
@@ -33,7 +33,7 @@ const FS = [
   "  vec3 tint=mix(vec3(1.),(c1+c2)*0.5,0.45);",
   "  float fill=smoothstep(-0.015,0.08,e)*(0.06+0.22*clamp(uv.y/h,0.,1.));",
   "  float line=exp(-abs(e)*90.)*0.55+exp(-abs(e)*18.)*0.18;",
-  "  col+=tint*(fill+line)*(0.8+0.4*beat);",
+  "  col+=tint*(fill+line)*(0.8+0.4*beat)*wave;",
   "  col+=(hash(gl_FragCoord.xy+fract(t))-0.5)/128.;",
   "  gl_FragColor=vec4(col,1.);",
   "}"
@@ -58,7 +58,7 @@ export function createSoftGradient(canvas) {
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   const u = {};
-  ["res", "t", "beat", "bass", "glow", "base", "c0", "c1", "c2", "c3", "c4", "spec[0]"].forEach((n) => u[n] = gl.getUniformLocation(prog, n));
+  ["res", "t", "beat", "bass", "glow", "wave", "base", "c0", "c1", "c2", "c3", "c4", "spec[0]"].forEach((n) => u[n] = gl.getUniformLocation(prog, n));
   let clock = Math.random() * 100, lift = 0;
   return {
     render(dt, energy, beat, bass, spectrum, palette) {
@@ -74,6 +74,7 @@ export function createSoftGradient(canvas) {
       gl.uniform1f(u.t, clock);
       gl.uniform1f(u.beat, beat);
       gl.uniform1f(u.bass, bass);
+      gl.uniform1f(u.wave, palette.wave ? 1 : 0);
       gl.uniform1fv(u["spec[0]"], spectrum);
       gl.uniform1f(u.glow, 0.85 + 0.2 * lift + 0.3 * bass + 0.25 * beat);
       gl.uniform3fv(u.base, palette.base);

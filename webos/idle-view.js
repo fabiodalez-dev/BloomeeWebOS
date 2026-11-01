@@ -24,7 +24,9 @@ const SOFT = [
   { id: "soft-aurora", label: "Aurora", soft: { base: [0.012, 0.063, 0.051], colors: [[0.075, 0.639, 0.49], [0.247, 0.82, 0.627], [0.176, 0.373, 0.827], [0.424, 0.247, 0.769], [0.608, 0.89, 0.478]] } },
   { id: "soft-sunset", label: "Tramonto", soft: { base: [0.078, 0.02, 0.027], colors: [[0.941, 0.455, 0.243], [0.851, 0.267, 0.427], [0.949, 0.698, 0.361], [0.541, 0.165, 0.42], [1.0, 0.561, 0.561]] } }
 ];
-const ALL = SOFT.concat(PRESETS.map((p) => ({ id: p.id, label: p.label, milk: p })));
+// The same colours with the spectrum wave: a choice of their own.
+const SPECTRA = SOFT.map((v) => ({ id: v.id.replace("soft-", "wave-"), label: "Spettro " + v.label.toLowerCase(), soft: Object.assign({ wave: true }, v.soft) }));
+const ALL = SOFT.concat(SPECTRA, PRESETS.map((p) => ({ id: p.id, label: p.label, milk: p })));
 export const VISUALS = ALL.map((v) => ({ id: v.id, label: v.label }));
 
 export function createIdleView(options) {
