@@ -1,5 +1,6 @@
 import { chooseRemoteTarget } from "./remote-focus.js";
 import { createScreenTimer } from "./screen-timer.js";
+import { createIdleView } from "./idle-view.js";
 import * as yt from "./youtube.js";
 import { createLibrary, homeRows, normalize } from "./library.js";
 import { createSearch, filterHits, groupVariants } from "./search-model.js";
@@ -37,7 +38,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     }
   };
   const lib = createLibrary(store);
-  let prefs = { screenOff: 0, autoPlay: true };
+  let prefs = { screenOff: 0, idleShow: "off", autoPlay: true };
   try {
     prefs = Object.assign(prefs, JSON.parse(store.getItem("bloomee.preferences") || "{}"));
   } catch (_) {
@@ -164,7 +165,17 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     }
     return { first, items };
   }
-  const screen = createScreenTimer({ off: () => api("/panel/off", null, "POST"), on: () => api("/panel/on", null, "POST"), error: (e) => notify(e.message) });
+  // Read with CORS: the visualiser's analyser hears silence otherwise. Every
+  // stream comes from the bridge, which allows the app's origin.
+  audio.crossOrigin = "anonymous";
+  const idle = createIdleView({ audio, parent: $("#app"), now: () => ({ art: $("#now-art").src, title: $("#now-title").textContent, artist: $("#now-artist").textContent }) });
+  // After the chosen time without keys: the panel off, or the cover, or the
+  // visualiser in place of the app. Whichever was done is undone by a key.
+  const screen = createScreenTimer({
+    off: () => prefs.idleShow === "cover" || prefs.idleShow === "visual" ? Promise.resolve(idle.show(prefs.idleShow)) : api("/panel/off", null, "POST"),
+    on: () => idle.mode ? Promise.resolve(idle.hide()) : api("/panel/on", null, "POST"),
+    error: (e) => notify(e.message)
+  });
   screen.configure(prefs.screenOff);
   function image(item) {
     if (item.source === "youtube") return item.thumb || "placeholder.svg";
@@ -629,6 +640,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     $("#now-art").src = image(item);
     $("#now-title").textContent = item.Name;
     $("#now-artist").textContent = artist(item);
+    idle.update();
     updateLike();
     altTried = false;
     const src = item.source === "youtube" ? url("/yt/audio/" + item.videoId) : url("/audio/" + item.Id);
@@ -721,6 +733,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   audio.addEventListener("playing", () => {
     $("#play").textContent = "Ⅱ";
     screen.playing(true);
+    idle.resume();
     failures = 0;
     const item = queue[current];
     if (item && recentFor !== item) {
@@ -1680,9 +1693,27 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
       choiceList.appendChild(b);
     });
     content.appendChild(choiceList);
-    row("Schermo spento, musica accesa", "Il pannello si spegne e la musica continua. Premi OK o una freccia per riaccenderlo.", button("Spegni ora", () => {
+    const shows = [["off", "Schermo spento"], ["cover", "Copertina e brano"], ["visual", "Visualizzatore"]];
+    const showRow = node("div", "setting-buttons");
+    shows.forEach(([value, label]) => {
+      const b = button(label, () => {
+        try {
+          savePrefs({ idleShow: value });
+          showRow.querySelectorAll("button").forEach((n) => n.setAttribute("aria-pressed", String(n === b)));
+          notify("Preferenza salvata");
+        } catch (e) {
+          notify("Impossibile salvare la preferenza");
+        }
+      });
+      b.setAttribute("aria-pressed", String(prefs.idleShow === value));
+      showRow.appendChild(b);
+    });
+    row("Mentre ascolti", "Cosa fa la TV dopo il tempo scelto qui sopra: spegne lo schermo, mostra la copertina con il brano o un visualizzatore che segue la musica. Lo schermo resta così, anche quando cambia brano, finché non premi un tasto.", showRow);
+    row("Schermo spento, musica accesa", "Il pannello si spegne e la musica continua. Premi un tasto qualsiasi per riaccenderlo.", button("Spegni ora", () => {
       if (audio.paused) return notify("Avvia prima la musica");
-      screen.sleep();
+      const show = prefs.idleShow;
+      prefs.idleShow = "off";
+      screen.sleep().then(() => prefs.idleShow = show, () => prefs.idleShow = show);
     }));
     row("Jellyfin", "Collegamento alla tua libreria musicale. Le credenziali restano private sulla TV.", button("Verifica", async () => {
       try {
@@ -1774,7 +1805,9 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   document.addEventListener("keydown", (e) => {
     const nativeVolume = [447, 448, 449].indexOf(e.keyCode) >= 0;
     const media = [415, 19, 413, 417, 412].indexOf(e.keyCode) >= 0 || e.key === "MediaPlayPause";
-    if (!nativeVolume && !media && screen.activity()) {
+    // Any key brings the screen back; play, pause and the others also do
+    // their job, the remaining keys only wake.
+    if (!nativeVolume && screen.activity() && !media) {
       e.preventDefault();
       e.stopImmediatePropagation();
       return;

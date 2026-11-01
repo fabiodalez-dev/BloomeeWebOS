@@ -853,3 +853,86 @@ main.hero h1 {
   letter-spacing: 6px;
   margin: 0 0 12px;
 }
+
+/* Mentre ascolti: copertina o visualizzatore al posto dell'app. */
+#idle-view {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  background: #000;
+  overflow: hidden;
+}
+#idle-view[hidden] {
+  display: none;
+}
+#idle-view .idle-backdrop {
+  position: absolute;
+  top: -80px;
+  right: -80px;
+  bottom: -80px;
+  left: -80px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(60px) brightness(0.35);
+}
+#idle-view canvas {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: none;
+}
+#idle-view.visual canvas {
+  display: block;
+}
+#idle-view .idle-now {
+  position: absolute;
+  left: 160px;
+  right: 160px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 72px;
+}
+#idle-view .idle-now img {
+  width: 520px;
+  height: 520px;
+  object-fit: cover;
+  border-radius: 24px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+#idle-view .idle-now strong {
+  display: block;
+  font-size: 72px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+#idle-view .idle-now span {
+  display: block;
+  margin-top: 20px;
+  font-size: 40px;
+  color: var(--muted);
+}
+#idle-view.visual .idle-now {
+  top: auto;
+  bottom: 70px;
+  transform: none;
+  gap: 32px;
+}
+#idle-view.visual .idle-now img {
+  width: 140px;
+  height: 140px;
+  border-radius: 12px;
+}
+#idle-view.visual .idle-now strong {
+  font-size: 44px;
+}
+#idle-view.visual .idle-now span {
+  margin-top: 8px;
+  font-size: 30px;
+}
