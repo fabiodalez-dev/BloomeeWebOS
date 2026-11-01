@@ -880,6 +880,8 @@ main.hero h1 {
 }
 #idle-view canvas {
   position: absolute;
+  width: 1920px;
+  height: 1080px;
   top: 0;
   right: 0;
   bottom: 0;

@@ -165,9 +165,6 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     }
     return { first, items };
   }
-  // Read with CORS: the visualiser's analyser hears silence otherwise. Every
-  // stream comes from the bridge, which allows the app's origin.
-  audio.crossOrigin = "anonymous";
   const idle = createIdleView({ audio, parent: $("#app"), now: () => ({ art: $("#now-art").src, title: $("#now-title").textContent, artist: $("#now-artist").textContent }) });
   // After the chosen time without keys: the panel off, or the cover, or the
   // visualiser in place of the app. Whichever was done is undone by a key.
@@ -733,7 +730,9 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   audio.addEventListener("playing", () => {
     $("#play").textContent = "Ⅱ";
     screen.playing(true);
-    idle.resume();
+    // The visualiser's copy of the track is decoded while the app is still
+    // on screen, ready when the screen gives way to the bars.
+    if (prefs.idleShow === "visual") idle.prepare(audio.currentSrc);
     failures = 0;
     const item = queue[current];
     if (item && recentFor !== item) {
