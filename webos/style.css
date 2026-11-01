@@ -888,10 +888,11 @@ main.hero h1 {
   left: 0;
   display: none;
 }
-#idle-view.visual canvas {
+/* A bedroom: the picture dimmed, never a light in the room. */
+#idle-view.milk canvas.milk,
+#idle-view.lava canvas.lava {
   display: block;
-  /* A bedroom: the picture dimmed, never a light in the room. */
-  opacity: 0.7;
+  opacity: 0.75;
 }
 #idle-view .idle-now {
   position: absolute;

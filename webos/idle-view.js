@@ -1,14 +1,15 @@
 // What the TV shows while music plays and nobody touches the remote: the
 // panel switched off (screen-timer.js), the cover with the track, or a
-// MilkDrop visualiser (Butterchurn, WebGL 2), slow and dark enough for a
-// bedroom. Any key brings back the app.
+// visualiser, slow and dark enough for a bedroom: soft gradients of our own, or
+// a MilkDrop preset (Butterchurn, WebGL 2). Any key brings back the app.
 //
 // LG plays <audio> in its own hardware pipeline: Web Audio attached to the
-// element hears only silence. So the visualiser listens to a second copy of
+// element hears only silence. So the visualisers listen to a second copy of
 // the track, fetched from the bridge, decoded, and played silently in step
 // with the element.
 import butterchurnModule from "butterchurn";
 import { PRESETS } from "./visual-presets.js";
+import { createSoftGradient } from "./soft-gradient.js";
 
 // A UMD bundle built with Babel: the API sits on .default.
 const butterchurn = butterchurnModule.default || butterchurnModule;
@@ -16,27 +17,35 @@ const butterchurn = butterchurnModule.default || butterchurnModule;
 // keeps a song to a few MB: the TV has 1 GB, and once the web apps passed
 // 350 MB webOS reloaded Bloomee.
 const RATE = 11025;
-const PRESET_SECONDS = 90, BLEND_SECONDS = 10;
-// Soft, slow presets from the MilkDrop classics (visual-presets.js): no
-// strobes, no white flashes, nothing that lights the room.
-export const VISUALS = PRESETS.map((p) => ({ id: p.id, label: p.label }));
+const CHANGE_SECONDS = 90, BLEND_SECONDS = 10;
+const SOFT = [
+  { id: "soft-violet", label: "Viola e pesca", soft: { base: [0.043, 0.027, 0.086], colors: [[0.482, 0.247, 0.894], [0.886, 0.333, 0.604], [1.0, 0.604, 0.42], [0.294, 0.169, 0.702], [0.784, 0.427, 0.843]] } },
+  { id: "soft-ocean", label: "Oceano", soft: { base: [0.012, 0.039, 0.078], colors: [[0.122, 0.435, 0.82], [0.098, 0.702, 0.788], [0.353, 0.275, 0.839], [0.051, 0.247, 0.561], [0.498, 0.839, 0.91]] } },
+  { id: "soft-aurora", label: "Aurora", soft: { base: [0.012, 0.063, 0.051], colors: [[0.075, 0.639, 0.49], [0.247, 0.82, 0.627], [0.176, 0.373, 0.827], [0.424, 0.247, 0.769], [0.608, 0.89, 0.478]] } },
+  { id: "soft-sunset", label: "Tramonto", soft: { base: [0.078, 0.02, 0.027], colors: [[0.941, 0.455, 0.243], [0.851, 0.267, 0.427], [0.949, 0.698, 0.361], [0.541, 0.165, 0.42], [1.0, 0.561, 0.561]] } }
+];
+const ALL = SOFT.concat(PRESETS.map((p) => ({ id: p.id, label: p.label, milk: p })));
+export const VISUALS = ALL.map((v) => ({ id: v.id, label: v.label }));
 
 export function createIdleView(options) {
   const doc = options.document || document, audio = options.audio;
-  let root = null, canvas = null, mode = null, frame = null;
-  let ctx = null, viz = null, feed = null, source = null, startedAt = 0, startedFrom = 0;
-  let buffer = null, bufferFor = null, loading = null, presetAt = 0, ticks = 0, shown = null;
+  let root = null, milkCanvas = null, lavaCanvas = null, mode = null, frame = null, last = 0;
+  let ctx = null, feed = null, analyser = null, bins = null, source = null, startedAt = 0, startedFrom = 0;
+  let viz = null, soft = null, shown = null, changedAt = 0, ticks = 0;
+  let buffer = null, bufferFor = null, loading = null;
+  let bass = 0, avg = 0.2, beat = 0, energy = 0;
 
   function build() {
     if (root) return;
     root = doc.createElement("div");
     root.id = "idle-view";
     root.hidden = true;
-    root.innerHTML = '<div class="idle-backdrop"></div><canvas width="960" height="540"></canvas><div class="idle-now"><img alt=""><div><strong></strong><span></span></div></div>';
-    canvas = root.querySelector("canvas");
+    root.innerHTML = '<div class="idle-backdrop"></div><canvas class="milk" width="960" height="540"></canvas><canvas class="lava" width="480" height="270"></canvas><div class="idle-now"><img alt=""><div><strong></strong><span></span></div></div>';
+    milkCanvas = root.querySelector("canvas.milk");
+    lavaCanvas = root.querySelector("canvas.lava");
     (options.parent || doc.body).appendChild(root);
   }
-  // The track decoded once, mono at 22 kHz: some MB for a song.
+  // The track decoded once, mono at 11 kHz: a few MB for a song.
   function prepare(src) {
     if (!src || src === bufferFor || (loading && loading.src === src)) return;
     buffer = null;
@@ -59,24 +68,34 @@ export function createIdleView(options) {
       if (loading === job) loading = null;
     });
   }
-  function setup() {
-    if (viz) return true;
+  function setupAudio() {
+    if (ctx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    ctx = new Ctx();
+    // The copy plays into the visualisers and, at zero volume, to the
+    // speakers: a node nobody pulls is never processed.
+    feed = ctx.createGain();
+    const silent = ctx.createGain();
+    silent.gain.value = 0;
+    feed.connect(silent);
+    silent.connect(ctx.destination);
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.6;
+    feed.connect(analyser);
+    bins = new Uint8Array(analyser.frequencyBinCount);
+  }
+  function setup(item) {
     try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      ctx = new Ctx();
-      // The copy plays into the visualiser and, at zero volume, to the
-      // speakers: a node nobody pulls is never processed.
-      feed = ctx.createGain();
-      const silent = ctx.createGain();
-      silent.gain.value = 0;
-      feed.connect(silent);
-      silent.connect(ctx.destination);
-      viz = butterchurn.createVisualizer(ctx, canvas, { width: canvas.width, height: canvas.height, pixelRatio: 1, textureRatio: 1, meshWidth: 32, meshHeight: 24 });
-      viz.connectAudio(feed);
-      return true;
+      setupAudio();
+      if (item.milk && !viz) {
+        viz = butterchurn.createVisualizer(ctx, milkCanvas, { width: milkCanvas.width, height: milkCanvas.height, pixelRatio: 1, textureRatio: 1, meshWidth: 32, meshHeight: 24 });
+        viz.connectAudio(feed);
+      }
+      if (item.soft && !soft) soft = createSoftGradient(lavaCanvas);
+      return item.milk ? !!viz : !!soft;
     } catch (e) {
       console.warn("Visualizzatore non disponibile: " + (e && e.stack || e));
-      viz = null;
       return false;
     }
   }
@@ -105,32 +124,54 @@ export function createIdleView(options) {
     startedAt = ctx.currentTime;
     source.start(0, startedFrom);
   }
-  function chosen() {
+  // The bass (up to about 150 Hz) against its own recent average: a beat
+  // when it jumps above it.
+  function listen(dt) {
+    analyser.getByteFrequencyData(bins);
+    let low = 0, all = 0;
+    for (let i = 2; i < 15; i++) low += bins[i];
+    for (let i = 2; i < 200; i++) all += bins[i];
+    low /= 13 * 255;
+    all /= 198 * 255;
+    bass += (low - bass) * 0.5;
+    avg += (bass - avg) * 0.02;
+    energy += (all - energy) * 0.05;
+    if (bass > avg * 1.18 && bass > 0.2 && beat < 0.4) beat = 1;
+    beat *= Math.pow(0.08, dt);
+  }
+  function chosenId() {
     const id = options.preset ? options.preset() : "auto";
-    return PRESETS.some((p) => p.id === id) ? id : "auto";
+    return ALL.some((v) => v.id === id) ? id : "auto";
   }
   function pickOther() {
-    const others = PRESETS.filter((p) => p.id !== shown);
-    return others[Math.floor(Math.random() * others.length)].id;
+    const others = ALL.filter((v) => v.id !== shown);
+    return others[Math.floor(Math.random() * others.length)];
   }
-  function load(id, blend) {
-    const p = PRESETS.find((x) => x.id === id);
-    if (!p || !viz) return;
-    viz.loadPreset(p.preset, blend);
-    shown = id;
+  function use(item, blend) {
+    if (!setup(item)) return false;
+    if (item.milk) viz.loadPreset(item.milk.preset, blend);
+    shown = item.id;
+    root.className = "visual " + (item.milk ? "milk" : "lava");
+    return true;
   }
   function draw(now) {
     frame = requestAnimationFrame(draw);
+    const dt = Math.min(0.1, last ? (now - last) / 1000 : 1 / 60);
+    last = now;
     if (ticks++ % 20 === 0) {
       if (ctx.state === "suspended") ctx.resume();
       sync();
     }
-    // "Cambia da solo": a slow blend to another one every minute and a half.
-    if (chosen() === "auto" && now - presetAt > PRESET_SECONDS * 1000) {
-      if (presetAt) load(pickOther(), BLEND_SECONDS);
-      presetAt = now;
+    // "Cambia da solo": another one every minute and a half.
+    if (chosenId() === "auto" && now - changedAt > CHANGE_SECONDS * 1000) {
+      if (changedAt) use(pickOther(), BLEND_SECONDS);
+      changedAt = now;
     }
-    viz.render();
+    listen(dt);
+    const item = ALL.find((v) => v.id === shown);
+    if (!item) return;
+    if (item.milk) viz.render({ elapsedTime: dt * item.milk.speed });
+    else soft.render(dt, energy, beat, item.soft);
   }
   function update() {
     if (!root) return;
@@ -144,15 +185,16 @@ export function createIdleView(options) {
     show(kind) {
       build();
       update();
-      mode = kind === "visual" && setup() ? "visual" : "cover";
-      if (mode === "visual") {
-        prepare(audio.currentSrc);
-        const id = chosen();
-        if (id !== "auto") {
-          if (shown !== id) load(id, 0);
-        } else if (!shown) load(pickOther(), 0);
+      mode = "cover";
+      root.className = "cover";
+      if (kind === "visual") {
+        const id = chosenId(), item = id === "auto" ? (ALL.find((v) => v.id === shown) || pickOther()) : ALL.find((v) => v.id === id);
+        if (shown === item.id && setup(item) || use(item, 0)) {
+          mode = "visual";
+          root.className = "visual " + (item.milk ? "milk" : "lava");
+          prepare(audio.currentSrc);
+        }
       }
-      root.className = mode;
       root.hidden = false;
       if (mode === "visual" && frame === null) frame = requestAnimationFrame(draw);
       return mode;
@@ -160,8 +202,9 @@ export function createIdleView(options) {
     hide() {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
+      last = 0;
       mode = null;
-      if (viz) {
+      if (ctx) {
         stopCopy();
         ctx.suspend();
       }

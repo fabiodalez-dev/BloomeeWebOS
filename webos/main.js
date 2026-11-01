@@ -1722,7 +1722,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
       b.setAttribute("aria-pressed", String(prefs.visual === value));
       visualRow.appendChild(b);
     });
-    row("Visualizzatore", "Le immagini che seguono la musica, lente e scure per non illuminare la stanza. «Cambia da solo» passa a un'altra ogni minuto e mezzo.", visualRow);
+    row("Visualizzatore", "Le immagini che seguono la musica, lente e scure per non illuminare la stanza. «Cambia da solo» passa a un altro ogni minuto e mezzo.", visualRow);
     row("Schermo spento, musica accesa", "Il pannello si spegne e la musica continua. Premi un tasto qualsiasi per riaccenderlo.", button("Spegni ora", () => {
       if (audio.paused) return notify("Avvia prima la musica");
       const show = prefs.idleShow;
