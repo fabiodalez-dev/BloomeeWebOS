@@ -947,3 +947,17 @@ main.hero h1 {
   margin-top: 8px;
   font-size: 30px;
 }
+
+/* An SVG icon inside a button, as in the menu: the TV's fonts lack some
+   symbols (the search lens, the filter lines) and showed an empty box. */
+button svg.ico {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.14em;
+  margin-right: 0.4em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

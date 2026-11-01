@@ -48,6 +48,17 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     Object.assign(prefs, patch);
     if (!saved) throw Error("Impossibile salvare la preferenza");
   }
+  // An SVG icon before the label: the TV's fonts lack some symbols.
+  const buttonIcons = { search: "M21 21l-5-5 M18 10a8 8 0 1 0-16 0 8 8 0 1 0 16 0", sliders: "M4 6h9 M17 6h3 M4 12h3 M11 12h9 M4 18h11 M19 18h1 M13 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0 M7 12a2 2 0 1 0 4 0 2 2 0 1 0-4 0 M15 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0", filter: "M4 6h16 M7 12h10 M10 18h4" };
+  function withIcon(b, name) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", "ico");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = '<path d="' + buttonIcons[name] + '"/>';
+    b.insertBefore(svg, b.firstChild);
+    return b;
+  }
   function notify(text) {
     $("#notice").textContent = text;
     $("#notice").hidden = false;
@@ -907,7 +918,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     const renderedAt = Date.now();
     if (!jellyfin) content.appendChild(node("p", "hint home-hint", "Collega Jellyfin da Impostazioni (menu a sinistra) per vedere qui la tua musica."));
     const tools = node("div", "actions home-tools");
-    tools.appendChild(button("\u2699 Personalizza", customize, "", "home:customize"));
+    tools.appendChild(withIcon(button("Personalizza", customize, "", "home:customize"), "sliders"));
     tools.appendChild(button("\u2665 Preferiti unificati", favoritesPage, "", "home:favorites"));
     content.appendChild(tools);
     // Fissare o togliere un elemento ridisegna solo questa riga: le altre, e il
@@ -1167,7 +1178,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
       }
     };
     row.appendChild(input);
-    row.appendChild(button("⌕ Cerca", submit, "primary", "search:go"));
+    row.appendChild(withIcon(button("Cerca", submit, "primary", "search:go"), "search"));
     content.appendChild(row);
     const kinds = node("div", "actions chips");
     ["Tutto", "Brani", "Album", "Artisti"].forEach((k) => {
@@ -1196,7 +1207,8 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
           const k = keyOf(b).slice(5);
           if (b !== filterButton) b.setAttribute("aria-pressed", String(k === filters.kind));
         });
-        filterButton.textContent = "☰ Filtri \xB7 " + filters.source + (filters.kind === "Playlist" ? " \xB7 Playlist" : "");
+        filterButton.textContent = "Filtri \xB7 " + filters.source + (filters.kind === "Playlist" ? " \xB7 Playlist" : "");
+        withIcon(filterButton, "filter");
         filterButton.setAttribute("aria-expanded", String(filters.open));
         panel.textContent = "";
         panel.hidden = !filters.open;
