@@ -731,7 +731,8 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     $("#play").textContent = "Ⅱ";
     screen.playing(true);
     // The visualiser's copy of the track is decoded while the app is still
-    // on screen, ready when the screen gives way to the bars.
+    // on screen, ready when the screen gives way to it; while it shows, the
+    // next track is decoded as it starts.
     if (prefs.idleShow === "visual") idle.prepare(audio.currentSrc);
     failures = 0;
     const item = queue[current];

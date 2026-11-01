@@ -188,6 +188,26 @@ export function createIdleView(options) {
     if (item.milk) viz.render({ elapsedTime: dt * item.milk.speed });
     else soft.render(dt, energy, beat, bass, spectrum, item.soft);
   }
+  // What the visualiser holds goes back as soon as it is hidden: the GPU
+  // contexts and the AudioContext (the decoded copy, a few MB, stays for the
+  // next time the screen rests). The TV has 1 GB, and
+  // when the web apps passed 420 MB LG switched the TV off and on again.
+  function release() {
+    stopCopy();
+    [milkCanvas, lavaCanvas].forEach((c) => {
+      const gl = c && (c.getContext("webgl2") || c.getContext("webgl"));
+      const lose = gl && gl.getExtension("WEBGL_lose_context");
+      if (lose) lose.loseContext();
+    });
+    if (ctx) ctx.close();
+    ctx = feed = analyser = bins = null;
+    viz = soft = null;
+    shown = null;
+    // A canvas whose context was lost cannot get a new one: the next show
+    // builds the view again.
+    if (root && root.parentNode) root.parentNode.removeChild(root);
+    root = milkCanvas = lavaCanvas = null;
+  }
   function update() {
     if (!root) return;
     const now = options.now();
@@ -219,11 +239,7 @@ export function createIdleView(options) {
       frame = null;
       last = 0;
       mode = null;
-      if (ctx) {
-        stopCopy();
-        ctx.suspend();
-      }
-      if (root) root.hidden = true;
+      release();
     },
     update,
     prepare,
