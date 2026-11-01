@@ -8,34 +8,24 @@
 // the track, fetched from the bridge, decoded, and played silently in step
 // with the element.
 import butterchurnModule from "butterchurn";
-import presetModule from "butterchurn-presets/lib/butterchurnPresets.min.js";
+import { PRESETS } from "./visual-presets.js";
 
-// Both are UMD bundles built with Babel: the API sits on .default.
+// A UMD bundle built with Babel: the API sits on .default.
 const butterchurn = butterchurnModule.default || butterchurnModule;
-const presetPack = presetModule.default || presetModule;
-
-const RATE = 22050;
-// Soft, slow presets from the MilkDrop classics: no strobes, no white
-// flashes, nothing that lights the room.
-const CALM = [
-  "Flexi + Martin - astral projection",
-  "martin - castle in the air",
-  "TonyMilkdrop - Magellan's Nebula [Flexi - you enter first + multiverse]",
-  "Geiss - Cauldron - painterly 2 (saturation remix)",
-  "Martin - liquid arrows",
-  "martin - stormy sea (2010 update)",
-  "cope + martin - mother-of-pearl",
-  "Rovastar - Oozing Resistance",
-  "Flexi - mindblob [shiny mix]",
-  "Geiss - Reaction Diffusion 2"
-];
+// 11 kHz is plenty for the bass and the mids that drive the pictures, and
+// keeps a song to a few MB: the TV has 1 GB, and once the web apps passed
+// 350 MB webOS reloaded Bloomee.
+const RATE = 11025;
 const PRESET_SECONDS = 90, BLEND_SECONDS = 10;
+// Soft, slow presets from the MilkDrop classics (visual-presets.js): no
+// strobes, no white flashes, nothing that lights the room.
+export const VISUALS = PRESETS.map((p) => ({ id: p.id, label: p.label }));
 
 export function createIdleView(options) {
   const doc = options.document || document, audio = options.audio;
   let root = null, canvas = null, mode = null, frame = null;
   let ctx = null, viz = null, feed = null, source = null, startedAt = 0, startedFrom = 0;
-  let buffer = null, bufferFor = null, loading = null, presets = null, presetAt = 0, ticks = 0;
+  let buffer = null, bufferFor = null, loading = null, presetAt = 0, ticks = 0, shown = null;
 
   function build() {
     if (root) return;
@@ -83,10 +73,6 @@ export function createIdleView(options) {
       silent.connect(ctx.destination);
       viz = butterchurn.createVisualizer(ctx, canvas, { width: canvas.width, height: canvas.height, pixelRatio: 1, textureRatio: 1, meshWidth: 32, meshHeight: 24 });
       viz.connectAudio(feed);
-      const all = presetPack.getPresets();
-      presets = CALM.filter((name) => all[name]).map((name) => all[name]);
-      if (!presets.length) presets = Object.keys(all).map((k) => all[k]);
-      viz.loadPreset(presets[Math.floor(Math.random() * presets.length)], 0);
       return true;
     } catch (e) {
       console.warn("Visualizzatore non disponibile: " + (e && e.stack || e));
@@ -119,14 +105,29 @@ export function createIdleView(options) {
     startedAt = ctx.currentTime;
     source.start(0, startedFrom);
   }
+  function chosen() {
+    const id = options.preset ? options.preset() : "auto";
+    return PRESETS.some((p) => p.id === id) ? id : "auto";
+  }
+  function pickOther() {
+    const others = PRESETS.filter((p) => p.id !== shown);
+    return others[Math.floor(Math.random() * others.length)].id;
+  }
+  function load(id, blend) {
+    const p = PRESETS.find((x) => x.id === id);
+    if (!p || !viz) return;
+    viz.loadPreset(p.preset, blend);
+    shown = id;
+  }
   function draw(now) {
     frame = requestAnimationFrame(draw);
     if (ticks++ % 20 === 0) {
       if (ctx.state === "suspended") ctx.resume();
       sync();
     }
-    if (now - presetAt > PRESET_SECONDS * 1000) {
-      if (presetAt) viz.loadPreset(presets[Math.floor(Math.random() * presets.length)], BLEND_SECONDS);
+    // "Cambia da solo": a slow blend to another one every minute and a half.
+    if (chosen() === "auto" && now - presetAt > PRESET_SECONDS * 1000) {
+      if (presetAt) load(pickOther(), BLEND_SECONDS);
       presetAt = now;
     }
     viz.render();
@@ -144,7 +145,13 @@ export function createIdleView(options) {
       build();
       update();
       mode = kind === "visual" && setup() ? "visual" : "cover";
-      if (mode === "visual") prepare(audio.currentSrc);
+      if (mode === "visual") {
+        prepare(audio.currentSrc);
+        const id = chosen();
+        if (id !== "auto") {
+          if (shown !== id) load(id, 0);
+        } else if (!shown) load(pickOther(), 0);
+      }
       root.className = mode;
       root.hidden = false;
       if (mode === "visual" && frame === null) frame = requestAnimationFrame(draw);

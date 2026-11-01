@@ -1,6 +1,6 @@
 import { chooseRemoteTarget } from "./remote-focus.js";
 import { createScreenTimer } from "./screen-timer.js";
-import { createIdleView } from "./idle-view.js";
+import { createIdleView, VISUALS } from "./idle-view.js";
 import * as yt from "./youtube.js";
 import { createLibrary, homeRows, normalize } from "./library.js";
 import { createSearch, filterHits, groupVariants } from "./search-model.js";
@@ -38,7 +38,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     }
   };
   const lib = createLibrary(store);
-  let prefs = { screenOff: 0, idleShow: "off", autoPlay: true };
+  let prefs = { screenOff: 0, idleShow: "off", visual: "auto", autoPlay: true };
   try {
     prefs = Object.assign(prefs, JSON.parse(store.getItem("bloomee.preferences") || "{}"));
   } catch (_) {
@@ -165,7 +165,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     }
     return { first, items };
   }
-  const idle = createIdleView({ audio, parent: $("#app"), now: () => ({ art: $("#now-art").src, title: $("#now-title").textContent, artist: $("#now-artist").textContent }) });
+  const idle = createIdleView({ audio, parent: $("#app"), preset: () => prefs.visual, now: () => ({ art: $("#now-art").src, title: $("#now-title").textContent, artist: $("#now-artist").textContent }) });
   // After the chosen time without keys: the panel off, or the cover, or the
   // visualiser in place of the app. Whichever was done is undone by a key.
   const screen = createScreenTimer({
@@ -1708,6 +1708,21 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
       showRow.appendChild(b);
     });
     row("Mentre ascolti", "Cosa fa la TV dopo il tempo scelto qui sopra: spegne lo schermo, mostra la copertina con il brano o un visualizzatore che segue la musica. Lo schermo resta così, anche quando cambia brano, finché non premi un tasto.", showRow);
+    const visualRow = node("div", "setting-buttons");
+    [["auto", "Cambia da solo"]].concat(VISUALS.map((v) => [v.id, v.label])).forEach(([value, label]) => {
+      const b = button(label, () => {
+        try {
+          savePrefs({ visual: value });
+          visualRow.querySelectorAll("button").forEach((n) => n.setAttribute("aria-pressed", String(n === b)));
+          notify("Preferenza salvata");
+        } catch (e) {
+          notify("Impossibile salvare la preferenza");
+        }
+      });
+      b.setAttribute("aria-pressed", String(prefs.visual === value));
+      visualRow.appendChild(b);
+    });
+    row("Visualizzatore", "Le immagini che seguono la musica, lente e scure per non illuminare la stanza. «Cambia da solo» passa a un'altra ogni minuto e mezzo.", visualRow);
     row("Schermo spento, musica accesa", "Il pannello si spegne e la musica continua. Premi un tasto qualsiasi per riaccenderlo.", button("Spegni ora", () => {
       if (audio.paused) return notify("Avvia prima la musica");
       const show = prefs.idleShow;

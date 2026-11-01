@@ -901,7 +901,11 @@ main.hero h1 {
   transform: translateY(-50%);
   display: flex;
   align-items: center;
-  gap: 72px;
+}
+/* No flex gap on the TV's Chrome 68: a margin keeps the text off the cover. */
+#idle-view .idle-now div {
+  margin-left: 72px;
+  min-width: 0;
 }
 #idle-view .idle-now img {
   width: 520px;
@@ -926,11 +930,13 @@ main.hero h1 {
   top: auto;
   bottom: 70px;
   transform: none;
-  gap: 32px;
+}
+#idle-view.visual .idle-now div {
+  margin-left: 36px;
 }
 #idle-view.visual .idle-now img {
-  width: 140px;
-  height: 140px;
+  width: 160px;
+  height: 160px;
   border-radius: 12px;
 }
 #idle-view.visual .idle-now strong {
