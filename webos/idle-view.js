@@ -9,7 +9,7 @@
 // with the element.
 import butterchurnModule from "butterchurn";
 import { PRESETS } from "./visual-presets.js";
-import { createSoftGradient } from "./soft-gradient.js";
+import { createSoftGradient, BANDS } from "./soft-gradient.js";
 
 // A UMD bundle built with Babel: the API sits on .default.
 const butterchurn = butterchurnModule.default || butterchurnModule;
@@ -34,6 +34,11 @@ export function createIdleView(options) {
   let viz = null, soft = null, shown = null, changedAt = 0, ticks = 0;
   let buffer = null, bufferFor = null, loading = null;
   let bass = 0, avg = 0.2, beat = 0, energy = 0;
+  const spectrum = new Float32Array(BANDS);
+  // The bands on a logarithmic scale, 40 Hz to 5 kHz, in bins of the 1024
+  // point analysis at 11 kHz (about 11 Hz each).
+  const edges = [];
+  for (let i = 0; i <= BANDS; i++) edges.push(Math.max(2, Math.round(40 * Math.pow(5000 / 40, i / BANDS) / (RATE / 1024))));
 
   function build() {
     if (root) return;
@@ -134,6 +139,14 @@ export function createIdleView(options) {
     low /= 13 * 255;
     all /= 198 * 255;
     bass += (low - bass) * 0.5;
+    for (let b = 0; b < BANDS; b++) {
+      const from = edges[b], to = Math.max(from + 1, edges[b + 1]);
+      let v = 0;
+      for (let i = from; i < to; i++) v += bins[i];
+      v /= (to - from) * 255;
+      // Up quickly, down slowly: the wave settles instead of flickering.
+      spectrum[b] += (v - spectrum[b]) * (v > spectrum[b] ? 0.5 : 0.12);
+    }
     avg += (bass - avg) * 0.02;
     energy += (all - energy) * 0.05;
     if (bass > avg * 1.18 && bass > 0.2 && beat < 0.4) beat = 1;
@@ -171,7 +184,7 @@ export function createIdleView(options) {
     const item = ALL.find((v) => v.id === shown);
     if (!item) return;
     if (item.milk) viz.render({ elapsedTime: dt * item.milk.speed });
-    else soft.render(dt, energy, beat, item.soft);
+    else soft.render(dt, energy, beat, bass, spectrum, item.soft);
   }
   function update() {
     if (!root) return;
