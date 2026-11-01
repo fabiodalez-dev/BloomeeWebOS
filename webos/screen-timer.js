@@ -14,10 +14,14 @@ export function createScreenTimer(options) {
     }catch(e){if(options.error)options.error(e);return false;}
     finally{pending=false;}
   }
-  async function wake(){clear();const wasOff=off||pending;if(off){try{await options.on();off=false;if(options.changed)options.changed(false);}catch(e){if(options.error)options.error(e);}}arm();return wasOff;}
+  // LG lights the panel by itself on the first key, which the app never
+  // sees; switching on a lit panel then fails. Either way the panel is on.
+  async function wake(){clear();const wasOff=off||pending;if(off){try{await options.on();}catch(_){}off=false;if(options.changed)options.changed(false);}arm();return wasOff;}
   return {
     configure(value){seconds=Math.max(0,Math.min(3600,Math.round(Number(value)||0)));arm();},
-    playing(value){playing=!!value;if(!playing)wake();else arm();},
+    // A pause does not wake the panel: the browser pauses at the end of every
+    // track, and a playlist would light the room at each song. Only a key does.
+    playing(value){playing=!!value;if(!playing)clear();else arm();},
     active(value){active=!!value;if(!active)wake();else arm();},
     activity(){if(off||pending){wake();return true;}arm();return false;},
     sleep,wake,isOff(){return off||pending;},dispose(){active=false;playing=false;return wake();}

@@ -1,6 +1,6 @@
 {
   "name": "bloomee-webos",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,5 +12,9 @@
   "devDependencies": {
     "@webos-tools/cli": "3.2.5",
     "esbuild": "0.25.0"
+  },
+  "dependencies": {
+    "butterchurn": "^2.6.7",
+    "butterchurn-presets": "^2.4.7"
   }
 }

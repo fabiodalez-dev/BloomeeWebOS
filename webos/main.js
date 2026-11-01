@@ -1,5 +1,6 @@
 import { chooseRemoteTarget } from "./remote-focus.js";
 import { createScreenTimer } from "./screen-timer.js";
+import { createIdleView, VISUALS } from "./idle-view.js";
 import * as yt from "./youtube.js";
 import { createLibrary, homeRows, normalize } from "./library.js";
 import { createSearch, filterHits, groupVariants } from "./search-model.js";
@@ -37,7 +38,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     }
   };
   const lib = createLibrary(store);
-  let prefs = { screenOff: 0, autoPlay: true };
+  let prefs = { screenOff: 0, idleShow: "off", visual: "auto", autoPlay: true };
   try {
     prefs = Object.assign(prefs, JSON.parse(store.getItem("bloomee.preferences") || "{}"));
   } catch (_) {
@@ -46,6 +47,17 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     const saved = store.setItem("bloomee.preferences", JSON.stringify(Object.assign({}, prefs, patch)));
     Object.assign(prefs, patch);
     if (!saved) throw Error("Impossibile salvare la preferenza");
+  }
+  // An SVG icon before the label: the TV's fonts lack some symbols.
+  const buttonIcons = { search: "M21 21l-5-5 M18 10a8 8 0 1 0-16 0 8 8 0 1 0 16 0", sliders: "M4 6h9 M17 6h3 M4 12h3 M11 12h9 M4 18h11 M19 18h1 M13 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0 M7 12a2 2 0 1 0 4 0 2 2 0 1 0-4 0 M15 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0", filter: "M4 6h16 M7 12h10 M10 18h4" };
+  function withIcon(b, name) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", "ico");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = '<path d="' + buttonIcons[name] + '"/>';
+    b.insertBefore(svg, b.firstChild);
+    return b;
   }
   function notify(text) {
     $("#notice").textContent = text;
@@ -164,7 +176,14 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     }
     return { first, items };
   }
-  const screen = createScreenTimer({ off: () => api("/panel/off", null, "POST"), on: () => api("/panel/on", null, "POST"), error: (e) => notify(e.message) });
+  const idle = createIdleView({ audio, parent: $("#app"), preset: () => prefs.visual, now: () => ({ art: $("#now-art").src, title: $("#now-title").textContent, artist: $("#now-artist").textContent }) });
+  // After the chosen time without keys: the panel off, or the cover, or the
+  // visualiser in place of the app. Whichever was done is undone by a key.
+  const screen = createScreenTimer({
+    off: () => prefs.idleShow === "cover" || prefs.idleShow === "visual" ? Promise.resolve(idle.show(prefs.idleShow)) : api("/panel/off", null, "POST"),
+    on: () => idle.mode ? Promise.resolve(idle.hide()) : api("/panel/on", null, "POST"),
+    error: (e) => notify(e.message)
+  });
   screen.configure(prefs.screenOff);
   function image(item) {
     if (item.source === "youtube") return item.thumb || "placeholder.svg";
@@ -629,6 +648,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     $("#now-art").src = image(item);
     $("#now-title").textContent = item.Name;
     $("#now-artist").textContent = artist(item);
+    idle.update();
     updateLike();
     altTried = false;
     const src = item.source === "youtube" ? url("/yt/audio/" + item.videoId) : url("/audio/" + item.Id);
@@ -721,6 +741,10 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   audio.addEventListener("playing", () => {
     $("#play").textContent = "Ⅱ";
     screen.playing(true);
+    // The visualiser's copy of the track is decoded while the app is still
+    // on screen, ready when the screen gives way to it; while it shows, the
+    // next track is decoded as it starts.
+    if (prefs.idleShow === "visual") idle.prepare(audio.currentSrc);
     failures = 0;
     const item = queue[current];
     if (item && recentFor !== item) {
@@ -779,10 +803,17 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
         current = i;
         start();
       } });
-      if (i === current) n.classList.add("selected");
+      if (i === current) {
+        n.classList.add("selected");
+        n.setAttribute("data-autofocus", "");
+      }
       content.appendChild(n);
     });
     focusFirst();
+    // The track playing at the top of the list; the ones already heard stay
+    // above it, a press of the up arrow away.
+    const playing = content.querySelector("[data-autofocus]");
+    if (playing) content.scrollTop = playing.offsetTop - 12;
   }
   // ── YouTube Music: elementi ─────────────────────────────────────────
   function ytFail(mark, e, retry) {
@@ -894,7 +925,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
     const renderedAt = Date.now();
     if (!jellyfin) content.appendChild(node("p", "hint home-hint", "Collega Jellyfin da Impostazioni (menu a sinistra) per vedere qui la tua musica."));
     const tools = node("div", "actions home-tools");
-    tools.appendChild(button("\u2699 Personalizza", customize, "", "home:customize"));
+    tools.appendChild(withIcon(button("Personalizza", customize, "", "home:customize"), "sliders"));
     tools.appendChild(button("\u2665 Preferiti unificati", favoritesPage, "", "home:favorites"));
     content.appendChild(tools);
     // Fissare o togliere un elemento ridisegna solo questa riga: le altre, e il
@@ -1154,7 +1185,7 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
       }
     };
     row.appendChild(input);
-    row.appendChild(button("⌕ Cerca", submit, "primary", "search:go"));
+    row.appendChild(withIcon(button("Cerca", submit, "primary", "search:go"), "search"));
     content.appendChild(row);
     const kinds = node("div", "actions chips");
     ["Tutto", "Brani", "Album", "Artisti"].forEach((k) => {
@@ -1183,7 +1214,8 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
           const k = keyOf(b).slice(5);
           if (b !== filterButton) b.setAttribute("aria-pressed", String(k === filters.kind));
         });
-        filterButton.textContent = "☰ Filtri \xB7 " + filters.source + (filters.kind === "Playlist" ? " \xB7 Playlist" : "");
+        filterButton.textContent = "Filtri \xB7 " + filters.source + (filters.kind === "Playlist" ? " \xB7 Playlist" : "");
+        withIcon(filterButton, "filter");
         filterButton.setAttribute("aria-expanded", String(filters.open));
         panel.textContent = "";
         panel.hidden = !filters.open;
@@ -1680,9 +1712,42 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
       choiceList.appendChild(b);
     });
     content.appendChild(choiceList);
-    row("Schermo spento, musica accesa", "Il pannello si spegne e la musica continua. Premi OK o una freccia per riaccenderlo.", button("Spegni ora", () => {
+    const shows = [["off", "Schermo spento"], ["cover", "Copertina e brano"], ["visual", "Visualizzatore"]];
+    const showRow = node("div", "setting-buttons");
+    shows.forEach(([value, label]) => {
+      const b = button(label, () => {
+        try {
+          savePrefs({ idleShow: value });
+          showRow.querySelectorAll("button").forEach((n) => n.setAttribute("aria-pressed", String(n === b)));
+          notify("Preferenza salvata");
+        } catch (e) {
+          notify("Impossibile salvare la preferenza");
+        }
+      });
+      b.setAttribute("aria-pressed", String(prefs.idleShow === value));
+      showRow.appendChild(b);
+    });
+    row("Mentre ascolti", "Cosa fa la TV dopo il tempo scelto qui sopra: spegne lo schermo, mostra la copertina con il brano o un visualizzatore che segue la musica. Lo schermo resta così, anche quando cambia brano, finché non premi un tasto.", showRow);
+    const visualRow = node("div", "setting-buttons");
+    [["auto", "Cambia da solo"]].concat(VISUALS.map((v) => [v.id, v.label])).forEach(([value, label]) => {
+      const b = button(label, () => {
+        try {
+          savePrefs({ visual: value });
+          visualRow.querySelectorAll("button").forEach((n) => n.setAttribute("aria-pressed", String(n === b)));
+          notify("Preferenza salvata");
+        } catch (e) {
+          notify("Impossibile salvare la preferenza");
+        }
+      });
+      b.setAttribute("aria-pressed", String(prefs.visual === value));
+      visualRow.appendChild(b);
+    });
+    row("Visualizzatore", "Le immagini che seguono la musica, lente e scure per non illuminare la stanza. «Cambia da solo» passa a un altro ogni minuto e mezzo.", visualRow);
+    row("Schermo spento, musica accesa", "Il pannello si spegne e la musica continua. Premi un tasto qualsiasi per riaccenderlo.", button("Spegni ora", () => {
       if (audio.paused) return notify("Avvia prima la musica");
-      screen.sleep();
+      const show = prefs.idleShow;
+      prefs.idleShow = "off";
+      screen.sleep().then(() => prefs.idleShow = show, () => prefs.idleShow = show);
     }));
     row("Jellyfin", "Collegamento alla tua libreria musicale. Le credenziali restano private sulla TV.", button("Verifica", async () => {
       try {
@@ -1774,7 +1839,9 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   document.addEventListener("keydown", (e) => {
     const nativeVolume = [447, 448, 449].indexOf(e.keyCode) >= 0;
     const media = [415, 19, 413, 417, 412].indexOf(e.keyCode) >= 0 || e.key === "MediaPlayPause";
-    if (!nativeVolume && !media && screen.activity()) {
+    // Any key brings the screen back; play, pause and the others also do
+    // their job, the remaining keys only wake.
+    if (!nativeVolume && screen.activity() && !media) {
       e.preventDefault();
       e.stopImmediatePropagation();
       return;
@@ -1925,9 +1992,11 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   Object.keys(transportPaths).forEach((id) => {
     $("#" + id).innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + transportPaths[id] + '"/></svg>';
   });
+  // Every track may lack a cover, not only the first: the fallback stays
+  // armed, and only the placeholder itself is never retried.
   $("#now-art").onerror = function() {
-    this.onerror = null;
-    this.src = "placeholder.svg";
+    if (!/placeholder\.svg$/.test(this.src)) this.src = "placeholder.svg";
+    idle.update();
   };
   $("#now-art").src = "placeholder.svg";
   $("#hero-art").onerror = function() {

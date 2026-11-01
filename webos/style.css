@@ -102,7 +102,8 @@ main {
   right: 0;
   top: 0;
   bottom: 146px;
-  padding: 42px 60px;
+  padding: 42px 60px 0;
+  box-sizing: border-box;
 }
 header {
   height: 130px;
@@ -130,7 +131,9 @@ h1 {
   letter-spacing: -1px;
 }
 #content {
-  height: 640px;
+  /* Down to the player: a fixed 640 px left a black band under the page. */
+  height: calc(100% - 130px);
+  box-sizing: border-box;
   overflow-y: auto;
   padding: 12px 12px 36px;
   outline: none;
@@ -852,4 +855,133 @@ main.hero h1 {
   font-weight: 700;
   letter-spacing: 6px;
   margin: 0 0 12px;
+}
+
+/* Mentre ascolti: copertina o visualizzatore al posto dell'app. */
+#idle-view {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  background: #000;
+  overflow: hidden;
+}
+#idle-view[hidden] {
+  display: none;
+}
+#idle-view .idle-backdrop {
+  position: absolute;
+  top: -80px;
+  right: -80px;
+  bottom: -80px;
+  left: -80px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(60px) brightness(0.35);
+}
+#idle-view canvas {
+  position: absolute;
+  width: 1920px;
+  height: 1080px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: none;
+}
+/* A bedroom: the picture dimmed, never a light in the room. */
+#idle-view.milk canvas.milk,
+#idle-view.lava canvas.lava {
+  display: block;
+  opacity: 0.75;
+}
+#idle-view .idle-now {
+  position: absolute;
+  left: 160px;
+  right: 160px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+}
+/* No flex gap on the TV's Chrome 68: a margin keeps the text off the cover. */
+#idle-view .idle-now div {
+  margin-left: 72px;
+  min-width: 0;
+}
+#idle-view .idle-now img {
+  width: 520px;
+  height: 520px;
+  object-fit: cover;
+  border-radius: 24px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+#idle-view .idle-now strong {
+  display: block;
+  font-size: 72px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+#idle-view .idle-now span {
+  display: block;
+  margin-top: 20px;
+  font-size: 40px;
+  color: var(--muted);
+}
+#idle-view.visual .idle-now {
+  top: auto;
+  bottom: 70px;
+  transform: none;
+}
+#idle-view.visual .idle-now div {
+  margin-left: 36px;
+}
+#idle-view.visual .idle-now img {
+  width: 160px;
+  height: 160px;
+  border-radius: 12px;
+}
+#idle-view.visual .idle-now strong {
+  font-size: 44px;
+}
+#idle-view.visual .idle-now span {
+  margin-top: 8px;
+  font-size: 30px;
+}
+
+/* An SVG icon inside a button, as in the menu: the TV's fonts lack some
+   symbols (the search lens, the filter lines) and showed an empty box. */
+button svg.ico {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.14em;
+  margin-right: 0.4em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* No cover: a white sleeve with a note, never an empty box. */
+#idle-view .idle-now img.blank {
+  background: #f4f1f5;
+}
+/* With the visualiser the track sits at the top left, away from the
+   spectrum wave along the bottom. */
+#idle-view.visual .idle-now {
+  top: 70px;
+  bottom: auto;
+}
+
+/* On a pink row (the track playing, a chosen button) the grey of the
+   secondary text disappeared: it takes the dark of the label instead. */
+.primary small,
+button.selected small,
+button[aria-pressed=true] small,
+button.selected .duration,
+button.selected .number {
+  color: rgba(36, 19, 30, 0.72);
 }
