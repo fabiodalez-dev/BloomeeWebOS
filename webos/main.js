@@ -803,10 +803,17 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
         current = i;
         start();
       } });
-      if (i === current) n.classList.add("selected");
+      if (i === current) {
+        n.classList.add("selected");
+        n.setAttribute("data-autofocus", "");
+      }
       content.appendChild(n);
     });
     focusFirst();
+    // The track playing at the top of the list; the ones already heard stay
+    // above it, a press of the up arrow away.
+    const playing = content.querySelector("[data-autofocus]");
+    if (playing) content.scrollTop = playing.offsetTop - 12;
   }
   // ── YouTube Music: elementi ─────────────────────────────────────────
   function ytFail(mark, e, retry) {
@@ -1985,9 +1992,11 @@ import { createSearch, filterHits, groupVariants } from "./search-model.js";
   Object.keys(transportPaths).forEach((id) => {
     $("#" + id).innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + transportPaths[id] + '"/></svg>';
   });
+  // Every track may lack a cover, not only the first: the fallback stays
+  // armed, and only the placeholder itself is never retried.
   $("#now-art").onerror = function() {
-    this.onerror = null;
-    this.src = "placeholder.svg";
+    if (!/placeholder\.svg$/.test(this.src)) this.src = "placeholder.svg";
+    idle.update();
   };
   $("#now-art").src = "placeholder.svg";
   $("#hero-art").onerror = function() {

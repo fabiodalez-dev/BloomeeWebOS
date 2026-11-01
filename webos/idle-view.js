@@ -10,6 +10,7 @@
 import butterchurnModule from "butterchurn";
 import { PRESETS } from "./visual-presets.js";
 import { createSoftGradient, BANDS } from "./soft-gradient.js";
+import { BLANK_COVER } from "./blank-cover.js";
 
 // A UMD bundle built with Babel: the API sits on .default.
 const butterchurn = butterchurnModule.default || butterchurnModule;
@@ -211,8 +212,18 @@ export function createIdleView(options) {
   function update() {
     if (!root) return;
     const now = options.now();
-    root.querySelector(".idle-now img").src = now.art || "placeholder.svg";
-    root.querySelector(".idle-backdrop").style.backgroundImage = now.art ? 'url("' + now.art + '")' : "none";
+    // The art is the footer's: when it failed there it is the placeholder,
+    // and a missing cover becomes a white sleeve.
+    const img = root.querySelector(".idle-now img"), art = now.art && !/placeholder\.svg$/.test(now.art) ? now.art : null;
+    img.onerror = function() {
+      this.onerror = null;
+      this.src = BLANK_COVER;
+      this.className = "blank";
+      root.querySelector(".idle-backdrop").style.backgroundImage = "none";
+    };
+    img.className = art ? "" : "blank";
+    img.src = art || BLANK_COVER;
+    root.querySelector(".idle-backdrop").style.backgroundImage = art ? 'url("' + art + '")' : "none";
     root.querySelector("strong").textContent = now.title || "";
     root.querySelector("span").textContent = now.artist || "";
   }
